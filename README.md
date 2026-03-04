@@ -15,6 +15,7 @@ make check
 ```bash
 make lint
 make test
+make review
 make build
 ```
 

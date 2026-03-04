@@ -8,7 +8,8 @@ Provide deterministic workflows so human and AI contributors can work safely and
 2. Write failing tests.
 3. Implement the smallest passing change.
 4. Run `make check`.
-5. Document notable behavior/contract updates.
+5. Run `make review` and self-review the full diff before commit.
+6. Document notable behavior/contract updates.
 
 ## Quality gates
 - Python: ruff, mypy, pytest

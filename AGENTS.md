@@ -6,12 +6,14 @@ This repository is configured for autonomous coding agents. Follow these rules e
 1. Create or update tests first (TDD).
 2. Implement the smallest change that makes tests pass.
 3. Run `make check` locally before asking for review.
-4. Keep commits small, isolated, and reversible.
-5. Update docs when behavior or interfaces change.
+4. Run `make review` and perform a self-review of the full diff before commit.
+5. Keep commits small, isolated, and reversible.
+6. Update docs when behavior or interfaces change.
 
 ## Definition of done
 - `make lint` passes
 - `make test` passes
+- `make review` has been run
 - New behavior is covered by tests
 - Existing behavior does not regress
 - `README.md` and/or docs are updated when needed
@@ -30,6 +32,7 @@ This repository is configured for autonomous coding agents. Follow these rules e
 
 ## Canonical commands
 - Bootstrap: `make bootstrap`
+- Self-review: `make review`
 - Lint/typecheck: `make lint`
 - Tests: `make test`
 - Full gate: `make check`

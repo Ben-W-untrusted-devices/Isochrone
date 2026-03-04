@@ -8,7 +8,7 @@ PYTEST ?= $(VENV_BIN)/pytest
 WEB_DIR := web
 PRE_COMMIT_HOME ?= .cache/pre-commit
 
-.PHONY: bootstrap bootstrap-python bootstrap-web precommit-install format lint test check build clean
+.PHONY: bootstrap bootstrap-python bootstrap-web precommit-install format lint test review check build clean
 
 bootstrap: bootstrap-python bootstrap-web
 
@@ -36,6 +36,17 @@ lint:
 test:
 	$(PYTEST) -q
 	npm --prefix $(WEB_DIR) run test
+
+review:
+	@echo "== Git status =="
+	@git status --short
+	@echo "== Diff summary =="
+	@git diff --stat
+	@echo "== Staged diff summary =="
+	@git diff --cached --stat
+	@echo "== Whitespace and conflict marker checks =="
+	@git diff --check
+	@git diff --cached --check
 
 check: lint test
 
