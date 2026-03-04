@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "isochrone"
+version = "0.1.0"
+description = "Berlin isochrone preprocessing pipeline"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.11",
+  "pre-commit>=4.0",
+  "pytest>=8.3",
+  "ruff>=0.7",
+]
+
+[tool.setuptools]
+package-dir = {"" = "data_pipeline/src"}
+
+[tool.setuptools.packages.find]
+where = ["data_pipeline/src"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-q"
+testpaths = ["data_pipeline/tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_configs = true
+mypy_path = ["data_pipeline/src"]
+packages = ["isochrone_pipeline"]

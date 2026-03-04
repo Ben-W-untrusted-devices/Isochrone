@@ -1,0 +1,30 @@
+# OS and editor files
+.DS_Store
+.vscode/
+.idea/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# JavaScript
+node_modules/
+web/node_modules/
+web/dist/
+
+# Build artifacts and logs
+*.log
+.cache/
+
+# Local data artifacts (can be regenerated)
+data_pipeline/input/
+data_pipeline/output/

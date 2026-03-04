@@ -1,0 +1,28 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-merge-conflict
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: web-lint
+        name: web-lint
+        entry: npm --prefix web run lint
+        language: system
+        pass_filenames: false
+      - id: web-format-check
+        name: web-format-check
+        entry: npm --prefix web run format:check
+        language: system
+        pass_filenames: false
