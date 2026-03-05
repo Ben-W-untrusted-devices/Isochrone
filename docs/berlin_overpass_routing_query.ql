@@ -14,7 +14,7 @@ Output: JSON with geometry and full tags.
 
 /* Deterministic Berlin selector: relation 62422 (Berlin, Germany / Q64) */
 rel(62422)["name"="Berlin"]["wikidata"="Q64"]->.berlinRel;
-map_to_area .berlinRel->.searchArea;
+.berlinRel map_to_area->.searchArea;
 
 (
   /* Core transport geometry */

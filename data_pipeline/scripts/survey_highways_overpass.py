@@ -58,7 +58,7 @@ def _build_tag_query() -> str:
     return """
 [out:json][timeout:300];
 rel(62422)->.berlinRel;
-map_to_area .berlinRel->.searchArea;
+.berlinRel map_to_area->.searchArea;
 (
   way["highway"](area.searchArea);
   relation["highway"](area.searchArea);
@@ -75,7 +75,7 @@ def _build_highway_geometry_query(limit: int) -> str:
     return f"""
 [out:json][timeout:300];
 rel(62422)->.berlinRel;
-map_to_area .berlinRel->.searchArea;
+.berlinRel map_to_area->.searchArea;
 way["highway"](area.searchArea);
 out geom qt {limit};
 """.strip()
