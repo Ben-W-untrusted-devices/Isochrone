@@ -205,25 +205,25 @@ Estimated time: 1 hour
 Estimated time: 20 min
 
 Tasks
-- Load `/data_pipeline/input/berlin-routing.osm.json`
-- Collect all `way` objects with a pedestrian-usable `highway` tag
-- Preserve routing constraint tags on each candidate way: `access`, `foot`, `oneway`, `oneway:foot`, `sidewalk`
-- Record the set of node IDs referenced by those ways
-- Collect connector nodes in a second lightweight pass: `barrier=*`, `highway=crossing`, `railway=level_crossing`, `entrance=*`
+- [x] Load `/data_pipeline/input/berlin-routing.osm.json`
+- [x] Collect all `way` objects with a pedestrian-usable `highway` tag
+- [x] Preserve routing constraint tags on each candidate way: `access`, `foot`, `oneway`, `oneway:foot`, `sidewalk`
+- [x] Record the set of node IDs referenced by those ways
+- [x] Collect connector nodes in a second lightweight pass: `barrier=*`, `highway=crossing`, `railway=level_crossing`, `entrance=*`
 
 ### 3.1.2 Load referenced nodes
 Estimated time: 20 min
 
 Tasks
-- Second pass: collect only `node` elements whose IDs are in the reference set
-- Store as dict `{osm_id: (lat, lon)}`
+- [x] Second pass: collect only `node` elements whose IDs are in the reference set
+- [x] Store as dict `{osm_id: (lat, lon)}`
 
 ### 3.1.3 Handle missing node references
 Estimated time: 20 min
 
 Tasks
-- Ways referencing nodes not in the extract (border effects) are silently dropped
-- Log count of dropped ways
+- [x] Ways referencing nodes not in the extract (border effects) are silently dropped
+- [x] Log count of dropped ways
 
 ---
 

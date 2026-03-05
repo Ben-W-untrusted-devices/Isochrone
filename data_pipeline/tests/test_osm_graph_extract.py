@@ -1,0 +1,87 @@
+from pathlib import Path
+
+from isochrone_pipeline.osm_graph_extract import (
+    collect_connector_nodes,
+    collect_walkable_way_candidates,
+    extract_walkable_graph_input,
+    load_referenced_nodes,
+)
+
+
+def _write_fixture(path: Path) -> None:
+    path.write_text(
+        """
+{
+  "version": 0.6,
+  "elements": [
+    {"type": "node", "id": 1, "lat": 52.5, "lon": 13.4},
+    {"type": "node", "id": 2, "lat": 52.5005, "lon": 13.401},
+    {"type": "node", "id": 3, "lat": 52.501, "lon": 13.402},
+    {"type": "node", "id": 10, "lat": 52.502, "lon": 13.403, "tags": {"highway": "crossing"}},
+    {
+      "type": "node",
+      "id": 11,
+      "lat": 52.503,
+      "lon": 13.404,
+      "tags": {"barrier": "gate", "entrance": "yes"}
+    },
+    {
+      "type": "way",
+      "id": 100,
+      "nodes": [1, 2, 3],
+      "tags": {"highway": "footway", "access": "yes", "oneway:foot": "no"}
+    },
+    {"type": "way", "id": 101, "nodes": [2, 4], "tags": {"highway": "residential", "foot": "yes"}},
+    {"type": "way", "id": 102, "nodes": [1, 2], "tags": {"highway": "motorway"}}
+  ]
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+
+def test_collect_walkable_way_candidates_and_constraints(tmp_path: Path) -> None:
+    source = tmp_path / "sample.json"
+    _write_fixture(source)
+
+    result = collect_walkable_way_candidates(source)
+
+    assert len(result.ways) == 2
+    assert result.ways[0].osm_id == 100
+    assert result.ways[0].constraints["access"] == "yes"
+    assert result.ways[0].constraints["oneway:foot"] == "no"
+    assert result.ways[1].osm_id == 101
+    assert result.ways[1].constraints["foot"] == "yes"
+    assert result.referenced_node_ids == {1, 2, 3, 4}
+
+
+def test_load_referenced_nodes_filters_to_requested_ids(tmp_path: Path) -> None:
+    source = tmp_path / "sample.json"
+    _write_fixture(source)
+
+    coords = load_referenced_nodes(source, {2, 3, 999})
+
+    assert set(coords.keys()) == {2, 3}
+
+
+def test_collect_connector_nodes_detects_types(tmp_path: Path) -> None:
+    source = tmp_path / "sample.json"
+    _write_fixture(source)
+
+    connectors = collect_connector_nodes(source)
+
+    assert connectors[10].connector_types == ("crossing",)
+    assert set(connectors[11].connector_types) == {"barrier", "entrance"}
+
+
+def test_extract_walkable_graph_input_drops_missing_node_ways(tmp_path: Path) -> None:
+    source = tmp_path / "sample.json"
+    _write_fixture(source)
+
+    extracted = extract_walkable_graph_input(source)
+
+    assert len(extracted.ways) == 1
+    assert extracted.ways[0].osm_id == 100
+    assert extracted.dropped_way_count == 1
+    assert set(extracted.node_coords.keys()) == {1, 2, 3}
+    assert set(extracted.connector_nodes.keys()) == {10, 11}
