@@ -231,11 +231,11 @@ Tasks
 Estimated time: 30 min
 
 Tasks
-- Use `pyproj.Transformer.from_crs("EPSG:4326", "EPSG:25833")`
-- Transform all node (lat, lon) → (easting, northing) in metres
-- Compute bounding box; derive `origin_easting`, `origin_northing` as minimum corner
-- Compute `grid_width_px = ceil((max_e - min_e) / 10)`, `grid_height_px = ceil((max_n - min_n) / 10)`
-- Store per-node as integer `(x_m, y_m)` offsets from origin (i32, max value ~50 000 for Berlin → fits in int32 with large margin)
+- [x] Use `pyproj.Transformer.from_crs("EPSG:4326", "EPSG:25833")`
+- [x] Transform all node (lat, lon) → (easting, northing) in metres
+- [x] Compute bounding box; derive `origin_easting`, `origin_northing` as minimum corner
+- [x] Compute `grid_width_px = ceil((max_e - min_e) / 10)`, `grid_height_px = ceil((max_n - min_n) / 10)`
+- [x] Store per-node as integer `(x_m, y_m)` offsets from origin (i32, max value ~50 000 for Berlin → fits in int32 with large margin)
 
 *For Berlin: bounding box is roughly 45 km × 38 km → grid is ~4 500 × 3 800 px → ~17 megapixels. At 4 bytes/pixel (RGBA), the pixel buffer is ~68 MB — within browser working memory. The canvas element will be this size but only the visible viewport is painted to screen.*
 

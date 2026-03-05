@@ -1,0 +1,13 @@
+{
+  "generated_at_utc": "2026-03-05T16:48:44.023812+00:00",
+  "input": "data_pipeline/input/berlin-routing.osm.json",
+  "epsg_code": 25833,
+  "pixel_size_m": 10.0,
+  "origin_easting": 370035.4331555407,
+  "origin_northing": 5799762.899206582,
+  "max_easting": 415776.11810010165,
+  "max_northing": 5837189.149395271,
+  "grid_width_px": 4575,
+  "grid_height_px": 3743,
+  "node_count": 1240433
+}
