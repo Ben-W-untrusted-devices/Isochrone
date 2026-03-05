@@ -81,9 +81,9 @@ Tasks
 Estimated time: 30 min
 
 Tasks
-- [ ] Write a short script to count `highway=*` values present in the Overpass JSON extract
-- [ ] Record which values are usable for pedestrian routing
-- [ ] Note typical node density per km of way
+- [x] Write a short script to count `highway=*` values present in the Overpass JSON extract
+- [x] Record which values are usable for pedestrian routing
+- [x] Note typical node density per km of way
 
 ---
 
