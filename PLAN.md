@@ -28,7 +28,7 @@ Estimated time: 45 min
 Tasks
 - [x] Install Python 3.11+
 - [x] Create virtual environment (`python -m venv .venv`)
-- [x] Install and pin: `pyosmium` (PyPI package name: `osmium`), `pyproj`, `numpy`, `struct` (stdlib)
+- [x] Install and pin: `requests`, `pyproj`, `numpy`, `struct` (stdlib)
 - [x] Write `requirements.txt`
 
 ---
@@ -70,18 +70,18 @@ Tasks
 ## 2.1 Explore OSM data for Berlin
 Estimated time: 45 min
 
-### 2.1.1 Download Berlin OSM extract
+### 2.1.1 Fetch Berlin OSM extract via Overpass
 Estimated time: 15 min
 
 Tasks
-- [ ] Download Berlin `.pbf` from Geofabrik (free, no registration)
-- [ ] Store in `/data_pipeline/input/`
+- [x] Use `docs/berlin_overpass_routing_query.ql` with `data_pipeline/fetch-data.sh`
+- [x] Store output as `/data_pipeline/input/berlin-routing.osm.json`
 
 ### 2.1.2 Survey walkable way tags
 Estimated time: 30 min
 
 Tasks
-- [ ] Write a short script to count `highway=*` values present in the extract
+- [ ] Write a short script to count `highway=*` values present in the Overpass JSON extract
 - [ ] Record which values are usable for pedestrian routing
 - [ ] Note typical node density per km of way
 
@@ -198,14 +198,14 @@ Tasks
 
 # Phase 3 — OSM Walking Graph Extraction
 
-## 3.1 Parse OSM PBF and filter walkable ways
+## 3.1 Parse Overpass JSON extract and filter walkable ways
 Estimated time: 1 hour
 
-### 3.1.1 Load PBF and iterate ways
+### 3.1.1 Load Overpass JSON and iterate ways
 Estimated time: 20 min
 
 Tasks
-- Use `pyosmium.SimpleHandler`
+- Load `/data_pipeline/input/berlin-routing.osm.json`
 - Collect all `way` objects with a pedestrian-usable `highway` tag
 - Preserve routing constraint tags on each candidate way: `access`, `foot`, `oneway`, `oneway:foot`, `sidewalk`
 - Record the set of node IDs referenced by those ways
@@ -215,7 +215,7 @@ Tasks
 Estimated time: 20 min
 
 Tasks
-- Second pass: collect only nodes whose IDs are in the reference set
+- Second pass: collect only `node` elements whose IDs are in the reference set
 - Store as dict `{osm_id: (lat, lon)}`
 
 ### 3.1.3 Handle missing node references
@@ -736,7 +736,7 @@ Tasks
 Web Workers are **not planned** at any phase. The routing loop is time-sliced via `requestAnimationFrame` (Phase 7.2), which gives adequate UI responsiveness without the complexity of cross-thread `ArrayBuffer` transfer, Worker lifecycle management, or the risk of needing `SharedArrayBuffer` (which requires specific COOP/COEP HTTP headers). If profiling after Phase 8 reveals that even 8 ms slices cause dropped frames (unlikely on a modern device for a 30-min isochrone), a Worker can be added then — but there is no basis for scheduling that work now.
 
 ## On future region support
-The pipeline is parameterised from Phase 3.2 onward: `--epsg`, `--input`, `--output` flags on all pipeline scripts. The binary header stores the EPSG code so the JS client knows which projection was used. To build a graph for any other city, the operator provides an OSM `.pbf` and optionally a GTFS `.zip`, then runs the pipeline. No code changes are needed for regions using any UTM zone or national grid projection supported by `pyproj`.
+The pipeline is parameterised from Phase 3.2 onward: `--epsg`, `--input`, `--output` flags on all pipeline scripts. The binary header stores the EPSG code so the JS client knows which projection was used. To build a graph for any other city, the operator provides an Overpass query (or equivalent OSM JSON extract) and optionally a GTFS `.zip`, then runs the pipeline. No code changes are needed for regions using any UTM zone or national grid projection supported by `pyproj`.
 
 ---
 
@@ -765,6 +765,7 @@ Post-MVP (Phase 11, GTFS transit) adds approximately **7–9 hours** of developm
 
 ## MVP artifacts
 - `berlin_graph.bin.gz` — compressed walking-only binary graph
+- `/data_pipeline/input/berlin-routing.osm.json` — Overpass JSON extract for Berlin routing build
 - `/web/dist/index.html`
 - `/web/dist/app.js` — minified bundle
 - `/data_pipeline/` — Python pipeline scripts
