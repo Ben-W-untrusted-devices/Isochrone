@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Survey Berlin highway tags using targeted Overpass API queries."""
+"""Survey Berlin routing-relevant OSM tags via targeted Overpass queries."""
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from collections import Counter
 from datetime import UTC, datetime
@@ -13,15 +12,25 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from isochrone_pipeline.overpass_survey import (
-    WALKABLE_HIGHWAY_VALUES,
-    compute_node_density_per_km,
-    count_highway_values,
-)
+from isochrone_pipeline.overpass_survey import compute_node_density_per_km
 
 OVERPASS_ENDPOINTS: tuple[str, ...] = (
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
+)
+
+ROUTING_TAGS: tuple[str, ...] = (
+    "maxspeed",
+    "maxspeed:forward",
+    "maxspeed:backward",
+    "access",
+    "foot",
+    "vehicle",
+    "motor_vehicle",
+    "bicycle",
+    "oneway",
+    "oneway:foot",
+    "sidewalk",
 )
 
 
@@ -47,70 +56,145 @@ def _run_overpass_query(query: str, timeout_s: int) -> list[dict[str, Any]]:
 
 def _build_tag_query() -> str:
     return """
-[out:json][timeout:180];
-area["name"="Berlin"]["boundary"="administrative"]["admin_level"="4"]->.searchArea;
-way["highway"](area.searchArea);
+[out:json][timeout:300];
+rel(62422)->.berlinRel;
+map_to_area .berlinRel->.searchArea;
+(
+  way["highway"](area.searchArea);
+  relation["highway"](area.searchArea);
+  node["barrier"](area.searchArea);
+  node["highway"="crossing"](area.searchArea);
+  node["railway"="level_crossing"](area.searchArea);
+  node["entrance"](area.searchArea);
+);
 out tags;
 """.strip()
 
 
-def _build_walkable_geometry_query(limit: int) -> str:
-    highway_regex = "|".join(re.escape(value) for value in WALKABLE_HIGHWAY_VALUES)
+def _build_highway_geometry_query(limit: int) -> str:
     return f"""
-[out:json][timeout:180];
-area["name"="Berlin"]["boundary"="administrative"]["admin_level"="4"]->.searchArea;
-way["highway"~"^{highway_regex}$"](area.searchArea);
+[out:json][timeout:300];
+rel(62422)->.berlinRel;
+map_to_area .berlinRel->.searchArea;
+way["highway"](area.searchArea);
 out geom qt {limit};
 """.strip()
 
 
+def _count_highway_values(elements: list[dict[str, Any]]) -> Counter[str]:
+    counts: Counter[str] = Counter()
+
+    for element in elements:
+        if element.get("type") not in {"way", "relation"}:
+            continue
+
+        tags = element.get("tags")
+        if not isinstance(tags, dict):
+            continue
+
+        highway = tags.get("highway")
+        if isinstance(highway, str):
+            counts[highway] += 1
+
+    return counts
+
+
+def _count_connector_nodes(elements: list[dict[str, Any]]) -> Counter[str]:
+    counts: Counter[str] = Counter()
+
+    for element in elements:
+        if element.get("type") != "node":
+            continue
+
+        tags = element.get("tags")
+        if not isinstance(tags, dict):
+            continue
+
+        if "barrier" in tags:
+            counts["barrier=*"] += 1
+        if tags.get("highway") == "crossing":
+            counts["highway=crossing"] += 1
+        if tags.get("railway") == "level_crossing":
+            counts["railway=level_crossing"] += 1
+        if "entrance" in tags:
+            counts["entrance=*"] += 1
+
+    return counts
+
+
+def _count_routing_tag_presence(elements: list[dict[str, Any]]) -> Counter[str]:
+    counts: Counter[str] = Counter()
+
+    for element in elements:
+        if element.get("type") not in {"way", "relation"}:
+            continue
+
+        tags = element.get("tags")
+        if not isinstance(tags, dict):
+            continue
+
+        if "highway" not in tags:
+            continue
+
+        for tag in ROUTING_TAGS:
+            if tag in tags:
+                counts[tag] += 1
+
+    return counts
+
+
 def _write_report(
     report_path: Path,
-    all_counts: Counter[str],
-    walkable_counts: Counter[str],
+    highway_counts: Counter[str],
+    connector_counts: Counter[str],
+    routing_tag_presence: Counter[str],
     density_nodes_per_km: float | None,
     sample_size: int,
 ) -> None:
     lines: list[str] = []
-    lines.append("# Berlin Highway Survey (Overpass)")
+    lines.append("# Berlin Routing Tag Survey (Overpass)")
     lines.append("")
     lines.append(f"Generated: {datetime.now(UTC).isoformat()}")
     lines.append("")
     lines.append("## Method")
-    lines.append("- Used targeted Overpass queries (no full `.pbf` download).")
-    lines.append("- Query 1: all Berlin `way[highway]` with `out tags` for value counts.")
+    lines.append("- Query 1: all Berlin highway ways/relations + connector nodes (`out tags`).")
     lines.append(
-        "- Query 2: walkable ways with geometry, capped to "
-        f"{sample_size} ways, for node-density estimation."
+        "- Query 2: highway way geometry sample "
+        f"({sample_size} ways) for node-density-per-km estimation."
     )
+    lines.append("- Public polygons are intentionally excluded.")
     lines.append("")
+
     lines.append("## `highway=*` counts (top 25)")
     lines.append("")
-    lines.append("| highway | ways |")
+    lines.append("| highway | elements |")
     lines.append("|---|---:|")
-
-    for highway, count in all_counts.most_common(25):
+    for highway, count in highway_counts.most_common(25):
         lines.append(f"| `{highway}` | {count:,} |")
-
-    lines.append("")
-    lines.append("## Walkable values observed")
     lines.append("")
 
-    observed_walkable = [
-        f"`{highway}` ({count:,})" for highway, count in walkable_counts.most_common() if count > 0
-    ]
-    if observed_walkable:
-        lines.append("- " + ", ".join(observed_walkable))
-    else:
-        lines.append("- No walkable highway values found in the queried data.")
-
+    lines.append("## Connector node counts")
     lines.append("")
-    lines.append("## Typical node density per km (walkable ways)")
+    lines.append("| connector | count |")
+    lines.append("|---|---:|")
+    for name in ("barrier=*", "highway=crossing", "railway=level_crossing", "entrance=*"):
+        lines.append(f"| `{name}` | {connector_counts.get(name, 0):,} |")
+    lines.append("")
+
+    lines.append("## Routing-tag presence on highway elements")
+    lines.append("")
+    lines.append("| tag | elements with tag |")
+    lines.append("|---|---:|")
+    for tag in ROUTING_TAGS:
+        lines.append(f"| `{tag}` | {routing_tag_presence.get(tag, 0):,} |")
+    lines.append("")
+
+    lines.append("## Typical node density per km of way")
     lines.append("")
     if density_nodes_per_km is None:
         lines.append("- Could not compute (insufficient geometry length).")
     else:
-        lines.append(f"- Estimated `~{density_nodes_per_km:.2f}` nodes/km from sampled geometry.")
+        lines.append(f"- Estimated `~{density_nodes_per_km:.2f}` nodes/km from sampled ways.")
 
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -122,7 +206,7 @@ def main() -> int:
         "--sample-limit",
         type=int,
         default=2000,
-        help="Max number of walkable ways to fetch geometry for density estimate.",
+        help="Max number of highway ways to fetch geometry for density estimate.",
     )
     parser.add_argument(
         "--output-markdown",
@@ -141,39 +225,39 @@ def main() -> int:
     if args.sample_limit <= 0:
         raise ValueError("--sample-limit must be positive")
 
-    tag_elements = _run_overpass_query(_build_tag_query(), timeout_s=240)
-    all_counts = count_highway_values(tag_elements)
+    tag_elements = _run_overpass_query(_build_tag_query(), timeout_s=360)
+    highway_counts = _count_highway_values(tag_elements)
+    connector_counts = _count_connector_nodes(tag_elements)
+    routing_tag_presence = _count_routing_tag_presence(tag_elements)
 
-    walkable_elements = _run_overpass_query(
-        _build_walkable_geometry_query(args.sample_limit), timeout_s=240
+    geometry_elements = _run_overpass_query(
+        _build_highway_geometry_query(args.sample_limit), timeout_s=360
     )
-    walkable_way_elements = [
-        element for element in walkable_elements if element.get("type") == "way"
+    highway_way_elements = [
+        element
+        for element in geometry_elements
+        if element.get("type") == "way" and isinstance(element.get("geometry"), list)
     ]
-    density_nodes_per_km = compute_node_density_per_km(walkable_way_elements)
-
-    walkable_counts: Counter[str] = Counter()
-    for highway in WALKABLE_HIGHWAY_VALUES:
-        walkable_counts[highway] = all_counts.get(highway, 0)
+    density_nodes_per_km = compute_node_density_per_km(highway_way_elements)
 
     _write_report(
         report_path=args.output_markdown,
-        all_counts=all_counts,
-        walkable_counts=walkable_counts,
+        highway_counts=highway_counts,
+        connector_counts=connector_counts,
+        routing_tag_presence=routing_tag_presence,
         density_nodes_per_km=density_nodes_per_km,
-        sample_size=len(walkable_way_elements),
+        sample_size=len(highway_way_elements),
     )
 
-    args.output_json.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "generated_at_utc": datetime.now(UTC).isoformat(),
-        "sample_way_count": len(walkable_way_elements),
+        "sample_way_count": len(highway_way_elements),
         "density_nodes_per_km": density_nodes_per_km,
-        "top_highway_counts": all_counts.most_common(50),
-        "walkable_counts": {
-            highway: walkable_counts[highway] for highway in WALKABLE_HIGHWAY_VALUES
-        },
+        "top_highway_counts": highway_counts.most_common(50),
+        "connector_counts": dict(connector_counts),
+        "routing_tag_presence": {tag: routing_tag_presence.get(tag, 0) for tag in ROUTING_TAGS},
     }
+    args.output_json.parent.mkdir(parents=True, exist_ok=True)
     args.output_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     print(f"Wrote markdown report: {args.output_markdown}")
