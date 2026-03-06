@@ -1,0 +1,8 @@
+{
+  "generated_at_utc": "2026-03-06T09:03:49.365261+00:00",
+  "input": "data_pipeline/input/berlin-routing.osm.json",
+  "node_count": 1240433,
+  "edge_count": 2760968,
+  "skipped_constraint_way_count": 30386,
+  "dropped_missing_node_way_count": 0
+}

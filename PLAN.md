@@ -248,26 +248,26 @@ Estimated time: 1 hour
 Estimated time: 25 min
 
 Tasks
-- For each walkable way, iterate consecutive node pairs
-- Emit edge (A→B) and (B→A) for each pair (walking is bidirectional by default)
-- Exception: `oneway:foot=yes` ways emit only forward edge
-- Respect constraints during edge creation: exclude disallowed segments (`access=private/no`, `foot=no`) and keep `sidewalk=*` metadata for later refinements
-- Preserve connector-node flags (`crossing`, `level_crossing`, `entrance`, `barrier`) so later routing logic can apply penalties/filters without re-parsing OSM
+- [x] For each walkable way, iterate consecutive node pairs
+- [x] Emit edge (A→B) and (B→A) for each pair (walking is bidirectional by default)
+- [x] Exception: `oneway:foot=yes` ways emit only forward edge
+- [x] Respect constraints during edge creation: exclude disallowed segments (`access=private/no`, `foot=no`) and keep `sidewalk=*` metadata for later refinements
+- [x] Preserve connector-node flags (`crossing`, `level_crossing`, `entrance`, `barrier`) so later routing logic can apply penalties/filters without re-parsing OSM
 
 ### 3.3.2 Compute edge walking cost
 Estimated time: 20 min
 
 Tasks
-- Euclidean distance in projected metres between the two endpoint nodes
-- Walking speed: 1.39 m/s (5 km/h); cost = `round(dist_m / 1.39)` seconds
-- Cap at uint16 max (65535 s ≈ 18 min); any longer edge is split at midpoint
+- [x] Euclidean distance in projected metres between the two endpoint nodes
+- [x] Walking speed: 1.39 m/s (5 km/h); cost = `round(dist_m / 1.39)` seconds
+- [x] Cap at uint16 max (65535 s ≈ 18 min); any longer edge is split at midpoint
 
 ### 3.3.3 Sort and index adjacency list
 Estimated time: 15 min
 
 Tasks
-- Sort edges by source node index
-- Record `first_edge_index` and `edge_count` per node
+- [x] Sort edges by source node index
+- [x] Record `first_edge_index` and `edge_count` per node
 
 ---
 
