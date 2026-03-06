@@ -312,9 +312,9 @@ Tasks
 Estimated time: 30 min
 
 Tasks
-- Pick 3 known Berlin locations; find nearest nodes; run BFS to confirm reachability
-- Assert no edge references an out-of-range node index
-- Assert edge costs are all > 0
+- [x] Pick 3 known Berlin locations; find nearest nodes; run BFS to confirm reachability
+- [x] Assert no edge references an out-of-range node index
+- [x] Assert edge costs are all > 0
 
 ---
 

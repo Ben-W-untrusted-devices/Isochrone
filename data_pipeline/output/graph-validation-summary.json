@@ -1,0 +1,44 @@
+{
+  "generated_at_utc": "2026-03-06T15:28:57.055743+00:00",
+  "input": "data_pipeline/input/berlin-routing.osm.json",
+  "before_node_count": 1240433,
+  "before_edge_count": 2760968,
+  "after_node_count": 573834,
+  "after_edge_count": 1415989,
+  "integrity": {
+    "edge_count": 1415989,
+    "out_of_range_edge_count": 0,
+    "non_positive_cost_count": 0
+  },
+  "landmarks": [
+    {
+      "name": "Brandenburg Gate",
+      "node_index": 439154,
+      "node_osm_id": 11366809508,
+      "distance_m": 15.03
+    },
+    {
+      "name": "Alexanderplatz",
+      "node_index": 148838,
+      "node_osm_id": 3527851388,
+      "distance_m": 28.07
+    },
+    {
+      "name": "Zoologischer Garten",
+      "node_index": 163988,
+      "node_osm_id": 4207250048,
+      "distance_m": 9.85
+    }
+  ],
+  "all_landmarks_reachable": true,
+  "source_to_unreachable": {
+    "Brandenburg Gate": [],
+    "Alexanderplatz": [],
+    "Zoologischer Garten": []
+  },
+  "source_to_reachable_count": {
+    "Brandenburg Gate": 478008,
+    "Alexanderplatz": 478008,
+    "Zoologischer Garten": 478008
+  }
+}
