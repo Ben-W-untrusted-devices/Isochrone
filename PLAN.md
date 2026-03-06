@@ -327,22 +327,22 @@ Estimated time: 45 min
 Estimated time: 15 min
 
 Tasks
-- Populate all header fields
-- Set `N_stops = 0`, `N_tedges = 0`
-- Set `flags` bit 0 = 0 (no transit)
+- [x] Populate all header fields
+- [x] Set `N_stops = 0`, `N_tedges = 0`
+- [x] Set `flags` bit 0 = 0 (no transit)
 
 ### 4.1.2 Write node and edge tables
 Estimated time: 20 min
 
 Tasks
-- Iterate nodes in index order; pack each 16-byte record
-- Iterate edges in source-node order; pack each 12-byte record
+- [x] Iterate nodes in index order; pack each 16-byte record
+- [x] Iterate edges in source-node order; pack each 12-byte record
 
 ### 4.1.3 Write empty stop and transit tables
 Estimated time: 10 min
 
 Tasks
-- Write zero bytes for both tables (preserves file format compatibility)
+- [x] Write zero bytes for both tables (preserves file format compatibility)
 
 ---
 
