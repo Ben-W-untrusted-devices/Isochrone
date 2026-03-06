@@ -1,0 +1,43 @@
+{
+  "generated_at_utc": "2026-03-06T19:49:42.195206+00:00",
+  "input": "/tmp/berlin-boundary-sample.json",
+  "format": "isochrone-canvas-boundaries-v1",
+  "resolution": {
+    "value": 25.0,
+    "units": "meters"
+  },
+  "coordinate_space": {
+    "units": "meters",
+    "projection": "EPSG:25833",
+    "x_origin": 389404.6734941663,
+    "y_origin": 5820221.153655798,
+    "width": 680.9482073526015,
+    "height": 95.9473158987239,
+    "axis": "x-right-y-down"
+  },
+  "features": [
+    {
+      "relation_id": 100,
+      "name": "SampleDistrict",
+      "admin_level": "9",
+      "paths": [
+        [
+          [
+            0.0,
+            95.9473158987239
+          ],
+          [
+            680.9482073526015,
+            0.0
+          ]
+        ]
+      ]
+    }
+  ],
+  "stats": {
+    "feature_count": 1,
+    "path_count": 1,
+    "input_point_count": 3,
+    "output_point_count": 2
+  }
+}
