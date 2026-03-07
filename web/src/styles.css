@@ -50,10 +50,27 @@ body {
   background: #dce4eb;
 }
 
-#map {
-  display: block;
+.canvas-stack {
+  position: relative;
   width: 100%;
   height: 100%;
+}
+
+#boundaries,
+#map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#boundaries {
+  z-index: 1;
+}
+
+#map {
+  z-index: 2;
 }
 
 #loading {

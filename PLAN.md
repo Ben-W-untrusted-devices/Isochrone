@@ -378,18 +378,18 @@ Estimated time: 1 hour
 Estimated time: 25 min
 
 Tasks
-- Fetch `berlin-district-boundaries-canvas.json`
-- Parse `coordinate_space` (`x_origin`, `y_origin`, `width`, `height`, axis info) and `features[].paths`
-- Convert boundary path coordinates to canvas pixel coordinates
+- [x] Fetch `berlin-district-boundaries-canvas.json`
+- [x] Parse `coordinate_space` (`x_origin`, `y_origin`, `width`, `height`, axis info) and `features[].paths`
+- [x] Convert boundary path coordinates to canvas pixel coordinates
 
 ### 5.2.2 Draw boundary basemap
 Estimated time: 35 min
 
 Tasks
-- Draw district polygons/lines on a dedicated basemap canvas layer (`canvas#boundaries`)
-- Style boundaries for readability (subtle fill + stronger stroke)
-- Show loading progress: "Loading district boundaries…" in the loading overlay
-- After drawing, keep the basemap layer static while isochrone rendering updates separately
+- [x] Draw district polygons/lines on a dedicated basemap canvas layer (`canvas#boundaries`)
+- [x] Style boundaries for readability (subtle fill + stronger stroke)
+- [x] Show loading progress: "Loading district boundaries…" in the loading overlay
+- [x] After drawing, keep the basemap layer static while isochrone rendering updates separately
 
 ---
 

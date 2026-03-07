@@ -15,8 +15,16 @@
       </header>
 
       <section class="map-region" aria-label="Map viewport">
-        <canvas id="map" width="1024" height="768" aria-label="Berlin map canvas"></canvas>
-        <div id="loading" role="status" aria-live="polite">Loading map and graph data...</div>
+        <div class="canvas-stack">
+          <canvas
+            id="boundaries"
+            width="1024"
+            height="768"
+            aria-label="Berlin district boundary basemap"
+          ></canvas>
+          <canvas id="map" width="1024" height="768" aria-label="Berlin map canvas"></canvas>
+        </div>
+        <div id="loading" role="status" aria-live="polite">Loading district boundaries...</div>
       </section>
     </main>
     <script src="./dist/app.js"></script>

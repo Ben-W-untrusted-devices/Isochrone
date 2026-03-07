@@ -6,6 +6,7 @@ const indexHtml = readFileSync(new globalThis.URL('../index.html', import.meta.u
 
 describe('index.html shell', () => {
   it('includes required map canvas and loading overlay', () => {
+    expect(indexHtml).toMatch(/<canvas[^>]*id="boundaries"/i);
     expect(indexHtml).toMatch(/<canvas[^>]*id="map"/i);
     expect(indexHtml).toMatch(/<div[^>]*id="loading"/i);
   });
