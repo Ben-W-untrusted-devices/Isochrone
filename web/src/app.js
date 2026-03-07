@@ -22,12 +22,13 @@ export function initializeAppShell(doc) {
     throw new Error('document is not available');
   }
 
-  const mapCanvas = resolvedDocument.getElementById('map');
+  const isochroneCanvas =
+    resolvedDocument.getElementById('isochrone') ?? resolvedDocument.getElementById('map');
   const boundaryCanvas = resolvedDocument.getElementById('boundaries');
   const loadingOverlay = resolvedDocument.getElementById('loading');
 
-  if (!mapCanvas || mapCanvas.tagName !== 'CANVAS') {
-    throw new Error('index.html is missing <canvas id="map">');
+  if (!isochroneCanvas || isochroneCanvas.tagName !== 'CANVAS') {
+    throw new Error('index.html is missing <canvas id="isochrone">');
   }
   if (!boundaryCanvas || boundaryCanvas.tagName !== 'CANVAS') {
     throw new Error('index.html is missing <canvas id="boundaries">');
@@ -36,15 +37,20 @@ export function initializeAppShell(doc) {
     throw new Error('index.html is missing <div id="loading">');
   }
 
-  sizeCanvasToCssPixels(mapCanvas);
+  sizeCanvasToCssPixels(isochroneCanvas);
   sizeCanvasToCssPixels(boundaryCanvas);
 
-  mapCanvas.style.pointerEvents = 'none';
-  mapCanvas.dataset.graphLoaded = 'false';
+  isochroneCanvas.style.pointerEvents = 'none';
+  isochroneCanvas.dataset.graphLoaded = 'false';
   loadingOverlay.hidden = false;
   loadingOverlay.textContent = 'Loading district boundaries...';
 
-  return { mapCanvas, boundaryCanvas, loadingOverlay };
+  return {
+    isochroneCanvas,
+    mapCanvas: isochroneCanvas,
+    boundaryCanvas,
+    loadingOverlay,
+  };
 }
 
 export function parseBoundaryBasemapPayload(payload) {
@@ -382,14 +388,14 @@ export async function loadGraphBinary(shell, options = {}) {
     });
 
     const graph = parseGraphBinary(buffer);
-    shell.mapCanvas.style.pointerEvents = 'auto';
-    shell.mapCanvas.dataset.graphLoaded = 'true';
+    shell.isochroneCanvas.style.pointerEvents = 'auto';
+    shell.isochroneCanvas.dataset.graphLoaded = 'true';
     shell.loadingOverlay.hidden = true;
     shell.loadingOverlay.textContent = '';
     return graph;
   } catch (error) {
-    shell.mapCanvas.style.pointerEvents = 'none';
-    shell.mapCanvas.dataset.graphLoaded = 'false';
+    shell.isochroneCanvas.style.pointerEvents = 'none';
+    shell.isochroneCanvas.dataset.graphLoaded = 'false';
     shell.loadingOverlay.hidden = false;
     shell.loadingOverlay.textContent = 'Failed to load graph binary.';
     throw error;
@@ -405,7 +411,7 @@ export async function initializeMapData(shell, options = {}) {
   const nodePixels = precomputeNodePixelCoordinates(graph);
   const pixelGrid = createPixelGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
   clearGrid(pixelGrid);
-  blitPixelGridToCanvas(shell.mapCanvas, pixelGrid);
+  blitPixelGridToCanvas(shell.isochroneCanvas, pixelGrid);
 
   return {
     boundarySummary,
@@ -564,7 +570,7 @@ export function renderReachableNodes(shell, mapData, distSeconds, options = {}) 
     distSeconds,
     options,
   );
-  blitPixelGridToCanvas(shell.mapCanvas, mapData.pixelGrid);
+  blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
   return paintedNodeCount;
 }
 

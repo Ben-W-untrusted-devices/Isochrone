@@ -9,7 +9,7 @@ def test_index_html_uses_native_module_entrypoint() -> None:
     index_html = (WEB_ROOT / "index.html").read_text(encoding="utf-8")
 
     assert 'id="boundaries"' in index_html
-    assert 'id="map"' in index_html
+    assert 'id="isochrone"' in index_html
     assert 'id="loading"' in index_html
     assert "dist/app.js" not in index_html
     assert re.search(
@@ -94,6 +94,14 @@ def test_app_js_has_reachable_paint_and_blit_contract() -> None:
         in app_js
     )
     assert "context.putImageData(imageData, 0, 0);" in app_js
+
+
+def test_app_js_uses_isochrone_canvas_layer() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "getElementById('isochrone')" in app_js
+    assert "shell.isochroneCanvas" in app_js
+    assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
 
 
 def test_styles_prevent_zero_height_map_region() -> None:

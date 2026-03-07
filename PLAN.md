@@ -464,8 +464,8 @@ Tasks
 Estimated time: 20 min
 
 Tasks
-- Canvas layering: `canvas#boundaries` (bottom) + `canvas#isochrone` (top, `position: absolute`)
-- On render: clear isochrone canvas; call `putImageData` for the current pixel grid
+- [x] Canvas layering: `canvas#boundaries` (bottom) + `canvas#isochrone` (top, `position: absolute`)
+- [x] On render: clear isochrone canvas; call `putImageData` for the current pixel grid
 
 ---
 
