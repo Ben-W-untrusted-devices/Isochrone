@@ -1,5 +1,12 @@
 export const DEFAULT_BOUNDARY_BASEMAP_URL =
   '../data_pipeline/output/berlin-district-boundaries-canvas.json';
+export const DEFAULT_GRAPH_BINARY_URL = '../data_pipeline/output/graph-walk.bin';
+export const GRAPH_MAGIC = 0x49534f43;
+
+const HEADER_SIZE = 64;
+const NODE_RECORD_SIZE = 16;
+const EDGE_RECORD_SIZE = 12;
+const BYTES_PER_MEBIBYTE = 1024 * 1024;
 
 export function minutesToSeconds(minutes) {
   if (minutes < 0) {
@@ -32,6 +39,8 @@ export function initializeAppShell(doc) {
   sizeCanvasToCssPixels(mapCanvas);
   sizeCanvasToCssPixels(boundaryCanvas);
 
+  mapCanvas.style.pointerEvents = 'none';
+  mapCanvas.dataset.graphLoaded = 'false';
   loadingOverlay.hidden = false;
   loadingOverlay.textContent = 'Loading district boundaries...';
 
@@ -210,14 +219,194 @@ export async function loadAndRenderBoundaryBasemap(shell, options = {}) {
     const payload = await response.json();
     const renderSummary = drawBoundaryBasemap(shell.boundaryCanvas, payload);
 
-    shell.loadingOverlay.textContent = 'Map ready.';
-    shell.loadingOverlay.hidden = true;
+    shell.loadingOverlay.textContent = 'Loading graph: 0.00 MB';
+    shell.loadingOverlay.hidden = false;
     return renderSummary;
   } catch (error) {
     shell.loadingOverlay.hidden = false;
     shell.loadingOverlay.textContent = 'Failed to load district boundaries.';
     throw error;
   }
+}
+
+export async function fetchBinaryWithProgress(url, options = {}) {
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  const onProgress = options.onProgress ?? (() => {});
+
+  if (typeof fetchImpl !== 'function') {
+    throw new Error('fetch is not available');
+  }
+  if (typeof onProgress !== 'function') {
+    throw new Error('onProgress must be a function');
+  }
+
+  const response = await fetchImpl(url);
+  if (!response.ok) {
+    throw new Error(`failed to fetch graph binary: HTTP ${response.status}`);
+  }
+
+  const totalBytes = parseContentLength(response.headers?.get('Content-Length'));
+
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    const fallbackBuffer = await response.arrayBuffer();
+    onProgress(fallbackBuffer.byteLength, totalBytes);
+    return fallbackBuffer;
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let receivedBytes = 0;
+
+  onProgress(0, totalBytes);
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (!value || value.byteLength === 0) {
+      continue;
+    }
+
+    chunks.push(value);
+    receivedBytes += value.byteLength;
+    onProgress(receivedBytes, totalBytes);
+  }
+
+  const merged = new Uint8Array(receivedBytes);
+  let writeOffset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, writeOffset);
+    writeOffset += chunk.byteLength;
+  }
+
+  onProgress(receivedBytes, totalBytes);
+  return merged.buffer;
+}
+
+export function parseGraphBinary(buffer) {
+  if (!(buffer instanceof ArrayBuffer)) {
+    throw new Error('graph binary parser expects an ArrayBuffer');
+  }
+  if (buffer.byteLength < HEADER_SIZE) {
+    throw new Error(`graph binary is too small for header: ${buffer.byteLength} bytes`);
+  }
+
+  const view = new DataView(buffer);
+  const magic = view.getUint32(0, true);
+  if (magic !== GRAPH_MAGIC) {
+    throw new Error(
+      `Invalid graph magic 0x${magic.toString(16).padStart(8, '0')}; expected 0x${GRAPH_MAGIC.toString(16)}`,
+    );
+  }
+
+  const nNodes = view.getUint32(8, true);
+  const nEdges = view.getUint32(12, true);
+  const nodeTableOffset = view.getUint32(52, true);
+  const edgeTableOffset = view.getUint32(56, true);
+  const stopTableOffset = view.getUint32(60, true);
+
+  const nodeTableEnd = nodeTableOffset + nNodes * NODE_RECORD_SIZE;
+  const edgeTableEnd = edgeTableOffset + nEdges * EDGE_RECORD_SIZE;
+
+  if (nodeTableOffset < HEADER_SIZE) {
+    throw new Error('graph binary node table offset points inside header');
+  }
+  if (edgeTableOffset < nodeTableEnd) {
+    throw new Error('graph binary edge table overlaps node table');
+  }
+  if (stopTableOffset < edgeTableEnd) {
+    throw new Error('graph binary stop table overlaps edge table');
+  }
+  if (nodeTableEnd > buffer.byteLength) {
+    throw new Error('graph binary node table exceeds file size');
+  }
+  if (edgeTableEnd > buffer.byteLength) {
+    throw new Error('graph binary edge table exceeds file size');
+  }
+  if (stopTableOffset > buffer.byteLength) {
+    throw new Error('graph binary stop table offset exceeds file size');
+  }
+  if (nodeTableOffset % 4 !== 0 || edgeTableOffset % 4 !== 0) {
+    throw new Error('graph binary table offsets must be 4-byte aligned');
+  }
+
+  const header = {
+    magic,
+    version: view.getUint8(4),
+    flags: view.getUint8(5),
+    nNodes,
+    nEdges,
+    nStops: view.getUint32(16, true),
+    nTedges: view.getUint32(20, true),
+    originEasting: view.getFloat64(24, true),
+    originNorthing: view.getFloat64(32, true),
+    epsgCode: view.getUint16(40, true),
+    gridWidthPx: view.getUint16(42, true),
+    gridHeightPx: view.getUint16(44, true),
+    pixelSizeM: view.getFloat32(48, true),
+    nodeTableOffset,
+    edgeTableOffset,
+    stopTableOffset,
+  };
+
+  const nodeI32 = new Int32Array(buffer, nodeTableOffset, nNodes * 4);
+  const nodeU32 = new Uint32Array(buffer, nodeTableOffset, nNodes * 4);
+  const nodeU16 = new Uint16Array(buffer, nodeTableOffset, nNodes * 8);
+  const edgeU32 = new Uint32Array(buffer, edgeTableOffset, nEdges * 3);
+  const edgeU16 = new Uint16Array(buffer, edgeTableOffset, nEdges * 6);
+
+  return {
+    header,
+    nodeI32,
+    nodeU32,
+    nodeU16,
+    edgeU32,
+    edgeU16,
+  };
+}
+
+export async function loadGraphBinary(shell, options = {}) {
+  const url = options.url ?? DEFAULT_GRAPH_BINARY_URL;
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+
+  shell.loadingOverlay.hidden = false;
+  shell.loadingOverlay.textContent = 'Loading graph: 0.00 MB';
+
+  try {
+    const buffer = await fetchBinaryWithProgress(url, {
+      fetchImpl,
+      onProgress(receivedBytes, totalBytes) {
+        updateGraphLoadingText(shell.loadingOverlay, receivedBytes, totalBytes);
+      },
+    });
+
+    const graph = parseGraphBinary(buffer);
+    shell.mapCanvas.style.pointerEvents = 'auto';
+    shell.mapCanvas.dataset.graphLoaded = 'true';
+    shell.loadingOverlay.hidden = true;
+    shell.loadingOverlay.textContent = '';
+    return graph;
+  } catch (error) {
+    shell.mapCanvas.style.pointerEvents = 'none';
+    shell.mapCanvas.dataset.graphLoaded = 'false';
+    shell.loadingOverlay.hidden = false;
+    shell.loadingOverlay.textContent = 'Failed to load graph binary.';
+    throw error;
+  }
+}
+
+export async function initializeMapData(shell, options = {}) {
+  const boundaryOptions = options.boundaries ?? {};
+  const graphOptions = options.graph ?? {};
+
+  const boundarySummary = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
+  const graph = await loadGraphBinary(shell, graphOptions);
+
+  return {
+    boundarySummary,
+    graph,
+  };
 }
 
 function sizeCanvasToCssPixels(canvas) {
@@ -239,6 +428,35 @@ function sizeCanvasToCssPixels(canvas) {
   if (canvas.height !== nextHeight) {
     canvas.height = nextHeight;
   }
+}
+
+function updateGraphLoadingText(overlay, receivedBytes, totalBytes) {
+  const receivedText = formatMebibytes(receivedBytes);
+  if (totalBytes === null || totalBytes <= 0) {
+    overlay.textContent = `Loading graph: ${receivedText}`;
+    return;
+  }
+
+  const totalText = formatMebibytes(totalBytes);
+  const percent = Math.min(100, Math.round((receivedBytes / totalBytes) * 100));
+  overlay.textContent = `Loading graph: ${receivedText} / ${totalText} (${percent}%)`;
+}
+
+function parseContentLength(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+function formatMebibytes(bytes) {
+  const safeBytes = Math.max(0, bytes);
+  return `${(safeBytes / BYTES_PER_MEBIBYTE).toFixed(2)} MB`;
 }
 
 function parseCoordinatePair(value, context) {
@@ -271,7 +489,7 @@ function isClosedPath(path) {
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', () => {
     const shell = initializeAppShell(globalThis.document);
-    void loadAndRenderBoundaryBasemap(shell).catch((error) => {
+    void initializeMapData(shell).catch((error) => {
       console.error(error);
     });
   });

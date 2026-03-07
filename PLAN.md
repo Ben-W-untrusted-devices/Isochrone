@@ -400,19 +400,19 @@ Estimated time: 1 hour
 Estimated time: 25 min
 
 Tasks
-- `fetch('berlin_graph.bin')` with `response.body` stream reader
-- Track bytes received vs `Content-Length`
-- Update loading overlay: "Loading graph: N MB / M MB (X%)"
+- [x] `fetch('graph-walk.bin')` with `response.body` stream reader
+- [x] Track bytes received vs `Content-Length`
+- [x] Update loading overlay: "Loading graph: N MB / M MB (X%)"
 
 ### 5.3.2 Parse TypedArrays from ArrayBuffer
 Estimated time: 35 min
 
 Tasks
-- Parse header fields using `DataView`
-- Map node table: `Int32Array` view for coordinates, `Uint32Array` for edge indices
-- Map edge table: `Uint32Array` for targets, `Uint16Array` for costs
-- Verify magic number; throw readable error if wrong
-- After parse: hide loading overlay; enable click interaction
+- [x] Parse header fields using `DataView`
+- [x] Map node table: `Int32Array` view for coordinates, `Uint32Array` for edge indices
+- [x] Map edge table: `Uint32Array` for targets, `Uint16Array` for costs
+- [x] Verify magic number; throw readable error if wrong
+- [x] After parse: hide loading overlay; enable click interaction
 
 ---
 
