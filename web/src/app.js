@@ -29,6 +29,7 @@ export function initializeAppShell(doc) {
   const loadingOverlay = resolvedDocument.getElementById('loading');
   const loadingText = resolvedDocument.getElementById('loading-text');
   const loadingProgressBar = resolvedDocument.getElementById('loading-progress-bar');
+  const routingStatus = resolvedDocument.getElementById('routing-status');
 
   if (!isochroneCanvas || isochroneCanvas.tagName !== 'CANVAS') {
     throw new Error('index.html is missing <canvas id="isochrone">');
@@ -45,6 +46,9 @@ export function initializeAppShell(doc) {
   if (!loadingProgressBar || loadingProgressBar.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="loading-progress-bar">');
   }
+  if (!routingStatus || routingStatus.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="routing-status">');
+  }
 
   sizeCanvasToCssPixels(isochroneCanvas);
   sizeCanvasToCssPixels(boundaryCanvas);
@@ -55,6 +59,7 @@ export function initializeAppShell(doc) {
   loadingOverlay.classList.remove('is-fading');
   loadingText.textContent = 'Loading district boundaries...';
   setLoadingProgressBar(loadingProgressBar, 0);
+  routingStatus.textContent = 'Ready.';
 
   return {
     isochroneCanvas,
@@ -63,6 +68,7 @@ export function initializeAppShell(doc) {
     loadingOverlay,
     loadingText,
     loadingProgressBar,
+    routingStatus,
     loadingFadeTimeoutId: null,
   };
 }
@@ -671,20 +677,26 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   if (!shell || !shell.isochroneCanvas) {
     throw new Error('shell.isochroneCanvas is required');
   }
+  if (!shell.routingStatus) {
+    throw new Error('shell.routingStatus is required');
+  }
   if (!mapData || typeof mapData !== 'object') {
     throw new Error('mapData must be an object');
   }
 
   clearGrid(mapData.pixelGrid);
   blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+  setRoutingStatus(shell, formatRoutingStatusCalculating(0));
 
   const alpha = options.alpha ?? 180;
   const onSliceExternal = options.onSlice;
   let paintedNodeCount = 0;
+  let settledNodeCount = 0;
 
   const runSummary = await runSearchTimeSliced(searchState, {
     ...options,
     onSlice(settledBatch) {
+      settledNodeCount += settledBatch.length;
       paintedNodeCount += paintSettledBatchToGrid(
         mapData.pixelGrid,
         mapData.nodePixels,
@@ -693,6 +705,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
         { alpha },
       );
       blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+      setRoutingStatus(shell, formatRoutingStatusCalculating(settledNodeCount));
 
       if (typeof onSliceExternal === 'function') {
         onSliceExternal(settledBatch);
@@ -700,10 +713,27 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
     },
   });
 
+  const doneMinutes = options.timeLimitMinutes ?? 30;
+  setRoutingStatus(shell, formatRoutingStatusDone(doneMinutes));
+
   return {
     ...runSummary,
     paintedNodeCount,
   };
+}
+
+export function formatRoutingStatusCalculating(settledCount) {
+  const safeCount = Math.max(0, Math.floor(settledCount));
+  return `Calculating... (${safeCount} nodes settled)`;
+}
+
+export function formatRoutingStatusDone(minutes) {
+  const safeMinutes = Math.max(0, Math.round(minutes));
+  return `Done - reachable area for ${safeMinutes} min walk`;
+}
+
+function setRoutingStatus(shell, text) {
+  shell.routingStatus.textContent = text;
 }
 
 function sizeCanvasToCssPixels(canvas) {

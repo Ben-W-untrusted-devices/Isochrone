@@ -498,8 +498,8 @@ Tasks
 Estimated time: 15 min
 
 Tasks
-- Small status line below canvas: "Calculating… (N nodes settled)" during search
-- On completion: "Done — reachable area for 30 min walk"
+- [x] Small status line below canvas: "Calculating… (N nodes settled)" during search
+- [x] On completion: "Done — reachable area for 30 min walk"
 
 ---
 

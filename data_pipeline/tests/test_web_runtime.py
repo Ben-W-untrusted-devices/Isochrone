@@ -14,6 +14,7 @@ def test_index_html_uses_native_module_entrypoint() -> None:
     assert 'id="loading-text"' in index_html
     assert 'id="loading-progress"' in index_html
     assert 'id="loading-progress-bar"' in index_html
+    assert 'id="routing-status"' in index_html
     assert "dist/app.js" not in index_html
     assert re.search(
         r'<script[^>]*type="module"[^>]*src="\./src/app\.js"',
@@ -133,6 +134,19 @@ def test_app_js_has_time_sliced_search_contract() -> None:
     assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
 
 
+def test_app_js_has_routing_status_text_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "getElementById('routing-status')" in app_js
+    assert "export function formatRoutingStatusCalculating(" in app_js
+    assert "Calculating..." in app_js
+    assert "nodes settled" in app_js
+    assert "export function formatRoutingStatusDone(" in app_js
+    assert "Done - reachable area for" in app_js
+    assert "setRoutingStatus(shell, formatRoutingStatusCalculating(0));" in app_js
+    assert "setRoutingStatus(shell, formatRoutingStatusDone(doneMinutes));" in app_js
+
+
 def test_styles_prevent_zero_height_map_region() -> None:
     styles_css = (WEB_ROOT / "src" / "styles.css").read_text(encoding="utf-8")
 
@@ -143,3 +157,4 @@ def test_styles_prevent_zero_height_map_region() -> None:
     assert "#loading-progress" in styles_css
     assert "#loading-progress-bar" in styles_css
     assert "#loading.is-fading" in styles_css
+    assert "#routing-status" in styles_css
