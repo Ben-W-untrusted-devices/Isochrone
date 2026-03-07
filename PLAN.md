@@ -1,6 +1,6 @@
 # PLAN.md — Berlin Isochrone Web App (Revised)
 
-**Goal:** A client-side web app that computes walking isochrones for Berlin using a preprocessed OpenStreetMap walking graph. All data loads as a compact binary graph. Rendering uses a 10 m/pixel raster painted onto an HTML canvas, overlaid on tiled OpenStreetMap basemap tiles.
+**Goal:** A client-side web app that computes walking isochrones for Berlin using a preprocessed OpenStreetMap walking graph. All data loads as a compact binary graph. Rendering uses a 10 m/pixel raster painted onto an HTML canvas, overlaid on a preprocessed Berlin district-boundary basemap JSON.
 
 Transit (GTFS/CSA) support is fully architected and stubbed, but real schedule data is deferred to post-MVP phases. The system is designed to accept any GTFS feed for any region, not just Berlin or Germany.
 
@@ -369,27 +369,27 @@ Tasks
 
 ---
 
-## 5.2 Implement OSM tile basemap
+## 5.2 Implement district-boundary basemap
 Estimated time: 1 hour
 
-*Replaces the static Berlin image. OSM tiles are free to use with attribution (© OpenStreetMap contributors). Tile URL: `https://tile.openstreetmap.org/{z}/{x}/{y}.png`.*
+*Use `data_pipeline/output/berlin-district-boundaries-canvas.json` generated from OSM administrative boundaries. OSM attribution remains required (© OpenStreetMap contributors).*
 
-### 5.2.1 Implement tile coordinate maths
+### 5.2.1 Load and map boundary JSON
 Estimated time: 25 min
 
 Tasks
-- Given a UTM 33N bounding box, compute the enclosing tile range at zoom 13 (roughly 10 m/pixel native tile resolution — a natural match)
-- Functions: `lonLatToTile(lon, lat, z)`, `tileToBBox(x, y, z)` (returns lon/lat bbox)
-- Derive pixel offset of each tile's top-left corner relative to canvas origin
+- Fetch `berlin-district-boundaries-canvas.json`
+- Parse `coordinate_space` (`x_origin`, `y_origin`, `width`, `height`, axis info) and `features[].paths`
+- Convert boundary path coordinates to canvas pixel coordinates
 
-### 5.2.2 Fetch and draw tiles
+### 5.2.2 Draw boundary basemap
 Estimated time: 35 min
 
 Tasks
-- On page load, compute required tile set for Berlin bounding box at zoom 13
-- Fetch each tile as `Image`; draw onto an offscreen canvas at correct pixel offset
-- Show loading progress: "Loading map tiles: N / M" in the loading overlay
-- After all tiles drawn, copy offscreen canvas to main canvas background layer
+- Draw district polygons/lines on a dedicated basemap canvas layer (`canvas#boundaries`)
+- Style boundaries for readability (subtle fill + stronger stroke)
+- Show loading progress: "Loading district boundaries…" in the loading overlay
+- After drawing, keep the basemap layer static while isochrone rendering updates separately
 
 ---
 
@@ -455,7 +455,7 @@ Estimated time: 25 min
 
 Tasks
 - After routing: for each node with `dist[i] < Infinity`, call `setPixel` with colour mapped from travel time
-- `putImageData` to canvas (composited over tile basemap using a second canvas layer with `globalAlpha`)
+- `putImageData` to canvas (composited over boundary basemap using a second canvas layer with `globalAlpha`)
 - Reachable cells are drawn with alpha ~180 (semi-transparent); unreachable cells are transparent
 
 ---
@@ -464,7 +464,7 @@ Tasks
 Estimated time: 20 min
 
 Tasks
-- Canvas layering: `canvas#tiles` (bottom) + `canvas#isochrone` (top, `position: absolute`)
+- Canvas layering: `canvas#boundaries` (bottom) + `canvas#isochrone` (top, `position: absolute`)
 - On render: clear isochrone canvas; call `putImageData` for the current pixel grid
 
 ---
@@ -477,7 +477,7 @@ Tasks
 Estimated time: 30 min
 
 Tasks
-- Loading overlay (see Phase 5.1) shows two sequential phases: "Loading map tiles: N/M" and "Loading graph: X%"
+- Loading overlay (see Phase 5.1) shows two sequential phases: "Loading district boundaries…" and "Loading graph: X%"
 - Overlay uses a simple CSS progress bar (`<div style="width: X%">`)
 - On completion of both, overlay fades out and click interaction is enabled
 
@@ -620,7 +620,7 @@ Estimated time: 30 min
 
 Tasks
 - Push `/web/dist/` and `berlin_graph.bin.gz` to `gh-pages` branch (or configure Pages source)
-- Verify tile loading, graph loading, and click-to-isochrone in deployed environment
+- Verify boundary basemap loading, graph loading, and click-to-isochrone in deployed environment
 - Verify `Content-Encoding: gzip` is being served correctly (check DevTools Network tab)
 
 ---
@@ -748,7 +748,7 @@ The pipeline is parameterised from Phase 3.2 onward: `--epsg`, `--input`, `--out
 | 2 | Data exploration + schema design + writer | 2.5 h |
 | 3 | OSM extraction + graph build | 4.5 h |
 | 4 | Binary export + validation | 1.25 h |
-| 5 | Web client shell + tiles + loader | 2.5 h |
+| 5 | Web client shell + boundary basemap + loader | 2.5 h |
 | 6 | Pixel grid + canvas rendering | 1.75 h |
 | 7 | Progress indication | 1.25 h |
 | 8 | Routing engine | 2.5 h |
@@ -766,6 +766,8 @@ Post-MVP (Phase 11, GTFS transit) adds approximately **7–9 hours** of developm
 ## MVP artifacts
 - `berlin_graph.bin.gz` — compressed walking-only binary graph
 - `/data_pipeline/input/berlin-routing.osm.json` — Overpass JSON extract for Berlin routing build
+- `/data_pipeline/output/berlin-district-boundaries-canvas.json` — simplified boundary basemap JSON
+- `/docs/berlin_district_boundaries_query.ql` — Overpass query for Berlin district boundaries
 - `/web/dist/index.html`
 - `/web/dist/app.js` — minified bundle
 - `/data_pipeline/` — Python pipeline scripts
