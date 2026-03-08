@@ -13,8 +13,19 @@ CONSTRAINT_TAGS: tuple[str, ...] = (
     "foot",
     "oneway",
     "oneway:foot",
+    "bicycle",
+    "cycleway",
+    "oneway:bicycle",
+    "motor_vehicle",
+    "vehicle",
     "sidewalk",
+    "junction",
+    "service",
+    "surface",
+    "tracktype",
     "maxspeed",
+    "maxspeed:forward",
+    "maxspeed:backward",
 )
 
 

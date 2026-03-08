@@ -647,11 +647,11 @@ Tasks
 Estimated time: 1 hour
 
 Tasks
-- [ ] Extend extraction tags beyond walking constraints to include bike/car legality and speed tags:
-  - [ ] `bicycle`, `cycleway`, `oneway:bicycle`
-  - [ ] `motor_vehicle`, `vehicle`, `oneway`
-  - [ ] `maxspeed`, `maxspeed:forward`, `maxspeed:backward`
-  - [ ] `junction`, `access`, `service`, `surface`, `tracktype` (for fallback speed heuristics)
+- [x] Extend extraction tags beyond walking constraints to include bike/car legality and speed tags:
+  - [x] `bicycle`, `cycleway`, `oneway:bicycle`
+  - [x] `motor_vehicle`, `vehicle`, `oneway`
+  - [x] `maxspeed`, `maxspeed:forward`, `maxspeed:backward`
+  - [x] `junction`, `access`, `service`, `surface`, `tracktype` (for fallback speed heuristics)
 - [ ] Persist extracted tags through `WayCandidate` into adjacency/export stages (no silent dropping)
 - [ ] Add extraction summary counts for tag presence/coverage (e.g. `% edges with explicit maxspeed`)
 

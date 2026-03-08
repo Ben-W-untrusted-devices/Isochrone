@@ -29,7 +29,25 @@ def _write_fixture(path: Path) -> None:
       "type": "way",
       "id": 100,
       "nodes": [1, 2, 3],
-      "tags": {"highway": "footway", "access": "yes", "oneway:foot": "no"}
+      "tags": {
+        "highway": "footway",
+        "access": "yes",
+        "oneway": "no",
+        "oneway:foot": "no",
+        "bicycle": "yes",
+        "cycleway": "track",
+        "oneway:bicycle": "no",
+        "motor_vehicle": "no",
+        "vehicle": "no",
+        "sidewalk": "both",
+        "junction": "roundabout",
+        "service": "alley",
+        "surface": "paving_stones",
+        "tracktype": "grade1",
+        "maxspeed": "30",
+        "maxspeed:forward": "25",
+        "maxspeed:backward": "20"
+      }
     },
     {"type": "way", "id": 101, "nodes": [2, 4], "tags": {"highway": "residential", "foot": "yes"}},
     {"type": "way", "id": 102, "nodes": [1, 2], "tags": {"highway": "motorway"}}
@@ -49,7 +67,21 @@ def test_collect_walkable_way_candidates_and_constraints(tmp_path: Path) -> None
     assert len(result.ways) == 2
     assert result.ways[0].osm_id == 100
     assert result.ways[0].constraints["access"] == "yes"
+    assert result.ways[0].constraints["oneway"] == "no"
     assert result.ways[0].constraints["oneway:foot"] == "no"
+    assert result.ways[0].constraints["bicycle"] == "yes"
+    assert result.ways[0].constraints["cycleway"] == "track"
+    assert result.ways[0].constraints["oneway:bicycle"] == "no"
+    assert result.ways[0].constraints["motor_vehicle"] == "no"
+    assert result.ways[0].constraints["vehicle"] == "no"
+    assert result.ways[0].constraints["sidewalk"] == "both"
+    assert result.ways[0].constraints["junction"] == "roundabout"
+    assert result.ways[0].constraints["service"] == "alley"
+    assert result.ways[0].constraints["surface"] == "paving_stones"
+    assert result.ways[0].constraints["tracktype"] == "grade1"
+    assert result.ways[0].constraints["maxspeed"] == "30"
+    assert result.ways[0].constraints["maxspeed:forward"] == "25"
+    assert result.ways[0].constraints["maxspeed:backward"] == "20"
     assert result.ways[1].osm_id == 101
     assert result.ways[1].constraints["foot"] == "yes"
     assert result.referenced_node_ids == {1, 2, 3, 4}
