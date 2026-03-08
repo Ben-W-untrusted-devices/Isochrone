@@ -1,26 +1,26 @@
 {
-  "generated_at_utc": "2026-03-06T18:33:32.160045+00:00",
+  "generated_at_utc": "2026-03-08T23:06:40.465285+00:00",
   "input": "data_pipeline/output/graph-walk.bin",
   "reader_lines": [
     "path=data_pipeline/output/graph-walk.bin",
-    "size_bytes=26173276",
+    "size_bytes=26203876",
     "magic=0x49534F43",
-    "version=1",
-    "counts=nodes:573834 edges:1415989 stops:0 tedges:0",
-    "offsets=nodes:64 edges:9181408 stops:26173276",
+    "version=2",
+    "counts=nodes:573834 edges:1418539 stops:0 tedges:0",
+    "offsets=nodes:64 edges:9181408 stops:26203876",
     "node0=NodeRecord(x_m=17144, y_m=25444, first_edge_index=0, edge_count=3, flags=0)",
-    "edge0=EdgeRecord(target_node_index=524319, cost_seconds=6, flags=0, reserved=0)"
+    "edge0=EdgeRecord(target_node_index=524319, cost_seconds=6, flags=0, reserved=3279623, mode_mask=7, maxspeed_kph=50, road_class_id=11)"
   ],
   "header": {
     "magic": "0x49534F43",
-    "version": 1,
+    "version": 2,
     "n_nodes": 573834,
-    "n_edges": 1415989,
+    "n_edges": 1418539,
     "n_stops": 0,
     "n_tedges": 0,
     "node_table_offset": 64,
     "edge_table_offset": 9181408,
-    "stop_table_offset": 26173276
+    "stop_table_offset": 26203876
   },
   "node_sample_count": 5,
   "node_spot_checks": [

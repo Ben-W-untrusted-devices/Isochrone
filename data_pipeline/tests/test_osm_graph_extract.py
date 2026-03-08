@@ -1,10 +1,12 @@
 from pathlib import Path
 
 from isochrone_pipeline.osm_graph_extract import (
+    WayCandidate,
     collect_connector_nodes,
     collect_walkable_way_candidates,
     extract_walkable_graph_input,
     load_referenced_nodes,
+    summarize_constraint_tag_coverage,
 )
 
 
@@ -117,3 +119,38 @@ def test_extract_walkable_graph_input_drops_missing_node_ways(tmp_path: Path) ->
     assert extracted.dropped_way_count == 1
     assert set(extracted.node_coords.keys()) == {1, 2, 3}
     assert set(extracted.connector_nodes.keys()) == {10, 11}
+
+
+def test_summarize_constraint_tag_coverage_counts_presence() -> None:
+    ways = (
+        WayCandidate(
+            osm_id=1,
+            highway="residential",
+            node_ids=(1, 2),
+            constraints={
+                "access": "yes",
+                "foot": "yes",
+                "bicycle": "yes",
+                "maxspeed": "50",
+            },
+        ),
+        WayCandidate(
+            osm_id=2,
+            highway="residential",
+            node_ids=(2, 3),
+            constraints={
+                "foot": "yes",
+                "motor_vehicle": "no",
+                "maxspeed:forward": "30",
+            },
+        ),
+    )
+    coverage = summarize_constraint_tag_coverage(ways)
+
+    assert coverage.total_way_count == 2
+    assert coverage.tag_presence["foot"] == 2
+    assert coverage.tag_presence["maxspeed"] == 1
+    assert coverage.tag_presence["maxspeed:forward"] == 1
+    assert coverage.tag_presence["maxspeed:backward"] == 0
+    assert coverage.tag_coverage_ratio["foot"] == 1.0
+    assert coverage.tag_coverage_ratio["maxspeed"] == 0.5

@@ -22,10 +22,41 @@ EDGE_FLAG_RESERVED_RESTRICTION_A = 1 << 8
 EDGE_FLAG_RESERVED_RESTRICTION_B = 1 << 9
 EDGE_FLAG_RESERVED_RESTRICTION_C = 1 << 10
 EDGE_FLAG_RESERVED_DYNAMIC_ACCESS = 1 << 11
+EDGE_FLAG_MODE_ONEWAY_PRESENT = EDGE_FLAG_RESERVED_RESTRICTION_A
+EDGE_FLAG_MODE_ONEWAY_BICYCLE_PRESENT = EDGE_FLAG_RESERVED_RESTRICTION_B
+EDGE_FLAG_MODE_ROUNDABOUT_PRESENT = EDGE_FLAG_RESERVED_RESTRICTION_C
+EDGE_FLAG_MODE_SPEED_DIRECTIONAL_PRESENT = EDGE_FLAG_RESERVED_DYNAMIC_ACCESS
 
 MODE_MASK_WALK = 1 << 0
 MODE_MASK_BIKE = 1 << 1
 MODE_MASK_CAR = 1 << 2
+
+ALLOW_VALUES = {"yes", "designated", "permissive", "official", "destination"}
+DENY_VALUES = {"no", "private"}
+
+BIKE_DEFAULT_HIGHWAYS = {
+    "cycleway",
+    "path",
+    "track",
+    "living_street",
+    "residential",
+    "service",
+    "unclassified",
+    "tertiary",
+    "secondary",
+    "primary",
+}
+CAR_DEFAULT_HIGHWAYS = {
+    "living_street",
+    "residential",
+    "service",
+    "unclassified",
+    "tertiary",
+    "secondary",
+    "primary",
+    "trunk",
+    "motorway",
+}
 
 ROAD_CLASS_BY_HIGHWAY: dict[str, int] = {
     "footway": 1,
@@ -278,12 +309,12 @@ def build_adjacency_graph(
 
 
 def _is_way_disallowed(way: WayCandidate) -> bool:
-    access = way.constraints.get("access")
-    foot = way.constraints.get("foot")
+    access = _normalized_constraint(way, "access")
+    foot = _normalized_constraint(way, "foot")
 
-    if access in {"private", "no"}:
+    if access in DENY_VALUES:
         return True
-    if foot == "no":
+    if foot in DENY_VALUES:
         return True
 
     return False
@@ -295,6 +326,14 @@ def _edge_flags(way: WayCandidate) -> int:
     sidewalk = way.constraints.get("sidewalk")
     if sidewalk is not None and sidewalk not in {"no", "none"}:
         flags |= EDGE_FLAG_SIDEWALK_PRESENT
+    if "oneway" in way.constraints:
+        flags |= EDGE_FLAG_MODE_ONEWAY_PRESENT
+    if "oneway:bicycle" in way.constraints:
+        flags |= EDGE_FLAG_MODE_ONEWAY_BICYCLE_PRESENT
+    if way.constraints.get("junction", "").lower() == "roundabout":
+        flags |= EDGE_FLAG_MODE_ROUNDABOUT_PRESENT
+    if "maxspeed:forward" in way.constraints or "maxspeed:backward" in way.constraints:
+        flags |= EDGE_FLAG_MODE_SPEED_DIRECTIONAL_PRESENT
 
     return flags
 
@@ -318,9 +357,41 @@ def _connector_flags(extracted: WalkableGraphExtract, osm_id: int) -> int:
     return flags
 
 
-def _mode_mask_for_way(_way: WayCandidate) -> int:
-    # Multimodal semantics land in Phase 10.4.3; v2 writes walk support explicitly now.
-    return MODE_MASK_WALK
+def _mode_mask_for_way(way: WayCandidate) -> int:
+    mask = MODE_MASK_WALK
+
+    if way.highway in BIKE_DEFAULT_HIGHWAYS:
+        mask |= MODE_MASK_BIKE
+    if way.highway in CAR_DEFAULT_HIGHWAYS:
+        mask |= MODE_MASK_CAR
+    if "cycleway" in way.constraints:
+        mask |= MODE_MASK_BIKE
+
+    access = _normalized_constraint(way, "access")
+    if access in DENY_VALUES:
+        mask = 0
+    elif access in ALLOW_VALUES:
+        mask |= MODE_MASK_WALK | MODE_MASK_BIKE | MODE_MASK_CAR
+
+    mask = _apply_mode_override(mask, MODE_MASK_WALK, _normalized_constraint(way, "foot"))
+    mask = _apply_mode_override(mask, MODE_MASK_BIKE, _normalized_constraint(way, "bicycle"))
+    mask = _apply_mode_override(
+        mask,
+        MODE_MASK_BIKE | MODE_MASK_CAR,
+        _normalized_constraint(way, "vehicle"),
+    )
+    mask = _apply_mode_override(
+        mask,
+        MODE_MASK_CAR,
+        _normalized_constraint(way, "motor_vehicle"),
+    )
+
+    if mask == 0:
+        # This pipeline still builds a walk graph in current runtime; hard-denied ways
+        # are already filtered by _is_way_disallowed before edge creation.
+        return MODE_MASK_WALK
+
+    return mask
 
 
 def _maxspeed_kph_for_way(way: WayCandidate) -> int:
@@ -343,3 +414,18 @@ def _maxspeed_kph_for_way(way: WayCandidate) -> int:
 
 def _road_class_id_for_way(highway: str) -> int:
     return ROAD_CLASS_BY_HIGHWAY.get(highway, 0)
+
+
+def _normalized_constraint(way: WayCandidate, key: str) -> str | None:
+    value = way.constraints.get(key)
+    if value is None:
+        return None
+    return value.strip().lower()
+
+
+def _apply_mode_override(mask: int, mode_bits: int, value: str | None) -> int:
+    if value in DENY_VALUES:
+        return mask & ~mode_bits
+    if value in ALLOW_VALUES:
+        return mask | mode_bits
+    return mask

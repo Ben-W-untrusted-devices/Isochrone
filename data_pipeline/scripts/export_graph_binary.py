@@ -11,7 +11,10 @@ from pathlib import Path
 from isochrone_pipeline.adjacency import build_adjacency_graph
 from isochrone_pipeline.binary_reader import parse_header
 from isochrone_pipeline.graph_binary import export_graph_binary_bytes
-from isochrone_pipeline.osm_graph_extract import extract_walkable_graph_input
+from isochrone_pipeline.osm_graph_extract import (
+    extract_walkable_graph_input,
+    summarize_constraint_tag_coverage,
+)
 from isochrone_pipeline.projection import project_nodes_to_utm
 from isochrone_pipeline.simplify import simplify_degree2_chains
 
@@ -45,6 +48,7 @@ def main() -> int:
     args = parser.parse_args()
 
     extracted = extract_walkable_graph_input(args.input)
+    tag_coverage = summarize_constraint_tag_coverage(extracted.ways)
     projected = project_nodes_to_utm(extracted.node_coords, epsg_code=args.epsg)
     graph = build_adjacency_graph(extracted, projected)
     simplified = simplify_degree2_chains(graph)
@@ -64,6 +68,9 @@ def main() -> int:
         "before_edge_count": simplified.before_edge_count,
         "after_node_count": simplified.after_node_count,
         "after_edge_count": simplified.after_edge_count,
+        "constraint_tag_presence": tag_coverage.tag_presence,
+        "constraint_tag_coverage_ratio": tag_coverage.tag_coverage_ratio,
+        "edge_mode_mask_counts": _edge_mode_mask_counts(simplified.graph.edges),
         "header": {
             "magic": f"0x{header.magic:08X}",
             "version": header.version,
@@ -94,6 +101,14 @@ def main() -> int:
     print(f"after_edge_count={simplified.after_edge_count}")
 
     return 0
+
+
+def _edge_mode_mask_counts(edges: tuple) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for edge in edges:
+        key = str(edge.mode_mask)
+        counts[key] = counts.get(key, 0) + 1
+    return counts
 
 
 if __name__ == "__main__":

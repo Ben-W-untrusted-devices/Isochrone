@@ -8,7 +8,10 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from isochrone_pipeline.osm_graph_extract import extract_walkable_graph_input
+from isochrone_pipeline.osm_graph_extract import (
+    extract_walkable_graph_input,
+    summarize_constraint_tag_coverage,
+)
 
 
 def main() -> int:
@@ -28,6 +31,7 @@ def main() -> int:
     args = parser.parse_args()
 
     extracted = extract_walkable_graph_input(args.input)
+    tag_coverage = summarize_constraint_tag_coverage(extracted.ways)
 
     summary = {
         "generated_at_utc": datetime.now(UTC).isoformat(),
@@ -36,6 +40,8 @@ def main() -> int:
         "node_count": len(extracted.node_coords),
         "connector_count": len(extracted.connector_nodes),
         "dropped_way_count": extracted.dropped_way_count,
+        "constraint_tag_presence": tag_coverage.tag_presence,
+        "constraint_tag_coverage_ratio": tag_coverage.tag_coverage_ratio,
     }
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

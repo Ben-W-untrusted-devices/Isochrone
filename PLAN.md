@@ -144,7 +144,7 @@ Estimated time: 45 min
 |--------|--------|-------|
 | 0      | uint32 | target_node_index |
 | 4      | uint16 | cost_seconds (walking, uint16 → max ~18 min per edge, sufficient) |
-| 6      | uint16 | flags (bit 0 `sidewalk_present`; bits 8..11 reserved for turn/access restriction encoding) |
+| 6      | uint16 | flags (bit 0 `sidewalk_present`; bits 8..11 carry oneway/roundabout/directional-speed tag-presence markers for later restriction logic) |
 | 8      | uint32 | packed metadata: bits 0..7 `mode_mask`, bits 8..15 `road_class_id`, bits 16..31 `maxspeed_kph` |
 
 *Tooling reads both v1 and v2. Writers emit v2.*
@@ -652,8 +652,8 @@ Tasks
   - [x] `motor_vehicle`, `vehicle`, `oneway`
   - [x] `maxspeed`, `maxspeed:forward`, `maxspeed:backward`
   - [x] `junction`, `access`, `service`, `surface`, `tracktype` (for fallback speed heuristics)
-- [ ] Persist extracted tags through `WayCandidate` into adjacency/export stages (no silent dropping)
-- [ ] Add extraction summary counts for tag presence/coverage (e.g. `% edges with explicit maxspeed`)
+- [x] Persist extracted tags through `WayCandidate` into adjacency/export stages (no silent dropping)
+- [x] Add extraction summary counts for tag presence/coverage (e.g. `% edges with explicit maxspeed`)
 
 ### 10.4.3 Normalize speed and access semantics
 Estimated time: 1 hour 15 min

@@ -1,9 +1,15 @@
 from isochrone_pipeline.adjacency import (
+    EDGE_FLAG_MODE_ONEWAY_BICYCLE_PRESENT,
+    EDGE_FLAG_MODE_ONEWAY_PRESENT,
+    EDGE_FLAG_MODE_ROUNDABOUT_PRESENT,
+    EDGE_FLAG_MODE_SPEED_DIRECTIONAL_PRESENT,
     EDGE_FLAG_RESERVED_DYNAMIC_ACCESS,
     EDGE_FLAG_RESERVED_RESTRICTION_A,
     EDGE_FLAG_RESERVED_RESTRICTION_B,
     EDGE_FLAG_RESERVED_RESTRICTION_C,
     EDGE_FLAG_SIDEWALK_PRESENT,
+    MODE_MASK_BIKE,
+    MODE_MASK_CAR,
     MODE_MASK_WALK,
     NODE_FLAG_BARRIER,
     NODE_FLAG_CROSSING,
@@ -180,3 +186,63 @@ def test_reserved_restriction_flag_bits_do_not_overlap_sidewalk_flag() -> None:
         | EDGE_FLAG_RESERVED_DYNAMIC_ACCESS
     )
     assert EDGE_FLAG_SIDEWALK_PRESENT & reserved_mask == 0
+
+
+def test_mode_mask_applies_vehicle_access_overrides() -> None:
+    extracted = WalkableGraphExtract(
+        ways=(
+            WayCandidate(
+                osm_id=600,
+                highway="residential",
+                node_ids=(1, 2),
+                constraints={
+                    "foot": "yes",
+                    "bicycle": "no",
+                    "vehicle": "no",
+                    "motor_vehicle": "yes",
+                },
+            ),
+        ),
+        node_coords={1: (52.5, 13.4), 2: (52.5001, 13.401)},
+        connector_nodes={},
+        dropped_way_count=0,
+    )
+    projected = _projection({1: (0, 0), 2: (10, 0)})
+
+    graph = build_adjacency_graph(extracted, projected)
+
+    assert len(graph.edges) == 2
+    for edge in graph.edges:
+        assert edge.mode_mask == (MODE_MASK_WALK | MODE_MASK_CAR)
+        assert (edge.mode_mask & MODE_MASK_BIKE) == 0
+
+
+def test_flags_capture_directionality_tag_presence() -> None:
+    extracted = WalkableGraphExtract(
+        ways=(
+            WayCandidate(
+                osm_id=601,
+                highway="residential",
+                node_ids=(1, 2),
+                constraints={
+                    "oneway": "yes",
+                    "oneway:bicycle": "yes",
+                    "junction": "roundabout",
+                    "maxspeed:forward": "50",
+                },
+            ),
+        ),
+        node_coords={1: (52.5, 13.4), 2: (52.5001, 13.401)},
+        connector_nodes={},
+        dropped_way_count=0,
+    )
+    projected = _projection({1: (0, 0), 2: (10, 0)})
+
+    graph = build_adjacency_graph(extracted, projected)
+
+    assert len(graph.edges) == 2
+    for edge in graph.edges:
+        assert edge.flags & EDGE_FLAG_MODE_ONEWAY_PRESENT
+        assert edge.flags & EDGE_FLAG_MODE_ONEWAY_BICYCLE_PRESENT
+        assert edge.flags & EDGE_FLAG_MODE_ROUNDABOUT_PRESENT
+        assert edge.flags & EDGE_FLAG_MODE_SPEED_DIRECTIONAL_PRESENT

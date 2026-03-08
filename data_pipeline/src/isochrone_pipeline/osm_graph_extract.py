@@ -59,6 +59,13 @@ class WalkableGraphExtract:
     dropped_way_count: int
 
 
+@dataclass(frozen=True)
+class ConstraintTagCoverage:
+    total_way_count: int
+    tag_presence: dict[str, int]
+    tag_coverage_ratio: dict[str, float]
+
+
 def collect_walkable_way_candidates(
     path: Path,
     walkable_highways: set[str] | None = None,
@@ -214,4 +221,29 @@ def extract_walkable_graph_input(
         node_coords=node_coords,
         connector_nodes=connector_nodes,
         dropped_way_count=dropped_way_count,
+    )
+
+
+def summarize_constraint_tag_coverage(
+    ways: tuple[WayCandidate, ...],
+    *,
+    tracked_tags: tuple[str, ...] = CONSTRAINT_TAGS,
+) -> ConstraintTagCoverage:
+    total_way_count = len(ways)
+    tag_presence = {tag: 0 for tag in tracked_tags}
+
+    for way in ways:
+        for tag in tracked_tags:
+            if tag in way.constraints:
+                tag_presence[tag] += 1
+
+    if total_way_count == 0:
+        tag_coverage_ratio = {tag: 0.0 for tag in tracked_tags}
+    else:
+        tag_coverage_ratio = {tag: tag_presence[tag] / total_way_count for tag in tracked_tags}
+
+    return ConstraintTagCoverage(
+        total_way_count=total_way_count,
+        tag_presence=tag_presence,
+        tag_coverage_ratio=tag_coverage_ratio,
     )
