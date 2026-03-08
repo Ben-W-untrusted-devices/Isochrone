@@ -578,9 +578,9 @@ Tasks
 Estimated time: 30 min
 
 Tasks
-- `canvas.addEventListener('click', ...)` reads pixel coordinates
-- Convert to UTM, find nearest node, launch Dijkstra
-- On new click during active search: cancel current search (set a `cancelled` flag checked each time-slice), clear pixel grid, start fresh
+- [x] `canvas.addEventListener('click', ...)` reads pixel coordinates
+- [x] Convert to UTM, find nearest node, launch Dijkstra
+- [x] On new click during active search: cancel current search (set a `cancelled` flag checked each time-slice), clear pixel grid, start fresh
 
 ---
 

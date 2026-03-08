@@ -360,6 +360,33 @@ export function mapCanvasPixelToGraphMeters(graph, xPx, yPx) {
   return { easting, northing };
 }
 
+export function mapClientPointToCanvasPixel(canvas, clientX, clientY) {
+  if (!canvas || typeof canvas.getBoundingClientRect !== 'function') {
+    throw new Error('canvas must provide getBoundingClientRect()');
+  }
+  if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) {
+    throw new Error('clientX and clientY must be finite numbers');
+  }
+  if (!Number.isInteger(canvas.width) || canvas.width <= 0) {
+    throw new Error('canvas.width must be a positive integer');
+  }
+  if (!Number.isInteger(canvas.height) || canvas.height <= 0) {
+    throw new Error('canvas.height must be a positive integer');
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  if (!(rect.width > 0) || !(rect.height > 0)) {
+    throw new Error('canvas bounding box must have positive width and height');
+  }
+
+  const normalizedX = (clientX - rect.left) / rect.width;
+  const normalizedY = (clientY - rect.top) / rect.height;
+  const xPx = clampInt(Math.floor(normalizedX * canvas.width), 0, canvas.width - 1);
+  const yPx = clampInt(Math.floor(normalizedY * canvas.height), 0, canvas.height - 1);
+
+  return { xPx, yPx };
+}
+
 export function findNearestNodeForCanvasPixel(mapData, xPx, yPx) {
   if (!mapData || typeof mapData !== 'object' || !mapData.graph) {
     throw new Error('mapData.graph is required');
@@ -410,6 +437,97 @@ export function highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex, o
   blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
 
   return { nodeIndex, xPx, yPx };
+}
+
+export function bindCanvasClickRouting(shell, mapData, options = {}) {
+  if (!shell || !shell.isochroneCanvas) {
+    throw new Error('shell.isochroneCanvas is required');
+  }
+  if (!mapData || typeof mapData !== 'object' || !mapData.graph) {
+    throw new Error('mapData.graph is required');
+  }
+
+  const timeLimitMinutes = options.timeLimitMinutes ?? 30;
+  const timeLimitSeconds = options.timeLimitSeconds ?? minutesToSeconds(timeLimitMinutes);
+  let activeRunToken = null;
+  let isDisposed = false;
+
+  const runFromCanvasPixel = async (xPx, yPx) => {
+    if (isDisposed) {
+      throw new Error('routing click handler is disposed');
+    }
+
+    if (activeRunToken !== null) {
+      activeRunToken.cancelled = true;
+    }
+
+    const runToken = { cancelled: false };
+    activeRunToken = runToken;
+
+    clearGrid(mapData.pixelGrid);
+    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+
+    const nearest = findNearestNodeForCanvasPixel(mapData, xPx, yPx);
+    highlightNodeIndexOnIsochroneCanvas(shell, mapData, nearest.nodeIndex);
+
+    try {
+      const runSummary = await runWalkingIsochroneFromSourceNode(
+        shell,
+        mapData,
+        nearest.nodeIndex,
+        timeLimitSeconds,
+        {
+          ...options,
+          timeLimitMinutes,
+          isCancelled: () => runToken.cancelled,
+        },
+      );
+
+      if (activeRunToken === runToken) {
+        activeRunToken = null;
+      }
+
+      return {
+        ...nearest,
+        ...runSummary,
+      };
+    } catch (error) {
+      if (activeRunToken === runToken) {
+        activeRunToken = null;
+      }
+      throw error;
+    }
+  };
+
+  const handleCanvasClick = (event) => {
+    const { xPx, yPx } = mapClientPointToCanvasPixel(
+      shell.isochroneCanvas,
+      event.clientX,
+      event.clientY,
+    );
+    void runFromCanvasPixel(xPx, yPx).catch((error) => {
+      setRoutingStatus(shell, 'Routing failed.');
+      console.error(error);
+    });
+  };
+
+  shell.isochroneCanvas.addEventListener('click', handleCanvasClick);
+
+  const dispose = () => {
+    if (isDisposed) {
+      return;
+    }
+    isDisposed = true;
+
+    if (activeRunToken !== null) {
+      activeRunToken.cancelled = true;
+      activeRunToken = null;
+    }
+
+    shell.isochroneCanvas.removeEventListener('click', handleCanvasClick);
+  };
+
+  return { dispose, runFromCanvasPixel };
 }
 
 export async function runWalkingIsochroneFromSourceNode(
@@ -1080,6 +1198,7 @@ export async function runSearchTimeSliced(searchState, options = {}) {
 
   const sliceBudgetMs = options.sliceBudgetMs ?? 8;
   const onSlice = options.onSlice ?? (() => {});
+  const isCancelled = options.isCancelled ?? (() => false);
   const nowImpl = options.nowImpl ?? defaultNowMs;
   const requestAnimationFrameImpl = options.requestAnimationFrameImpl ?? globalThis.requestAnimationFrame;
 
@@ -1089,19 +1208,33 @@ export async function runSearchTimeSliced(searchState, options = {}) {
   if (typeof onSlice !== 'function') {
     throw new Error('onSlice must be a function');
   }
+  if (typeof isCancelled !== 'function') {
+    throw new Error('isCancelled must be a function');
+  }
   if (typeof nowImpl !== 'function') {
     throw new Error('nowImpl must be a function');
   }
 
   let totalSettledCount = 0;
   let sliceCount = 0;
+  let cancelled = false;
 
   while (!isDone(searchState)) {
+    if (isCancelled()) {
+      cancelled = true;
+      break;
+    }
+
     const settledBatch = [];
     const sliceStartMs = nowImpl();
     let elapsedMs = 0;
 
     while (elapsedMs < sliceBudgetMs && !isDone(searchState)) {
+      if (isCancelled()) {
+        cancelled = true;
+        break;
+      }
+
       const settledNodeIndex = searchState.expandOne();
       if (Number.isInteger(settledNodeIndex) && settledNodeIndex >= 0) {
         settledBatch.push(settledNodeIndex);
@@ -1109,6 +1242,10 @@ export async function runSearchTimeSliced(searchState, options = {}) {
       }
 
       elapsedMs = nowImpl() - sliceStartMs;
+    }
+
+    if (cancelled) {
+      break;
     }
 
     onSlice(settledBatch);
@@ -1122,6 +1259,7 @@ export async function runSearchTimeSliced(searchState, options = {}) {
   return {
     totalSettledCount,
     sliceCount,
+    cancelled,
   };
 }
 
@@ -1165,8 +1303,10 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
     },
   });
 
-  const doneMinutes = options.timeLimitMinutes ?? 30;
-  setRoutingStatus(shell, formatRoutingStatusDone(doneMinutes));
+  if (!runSummary.cancelled) {
+    const doneMinutes = options.timeLimitMinutes ?? 30;
+    setRoutingStatus(shell, formatRoutingStatusDone(doneMinutes));
+  }
 
   return {
     ...runSummary,
@@ -1468,8 +1608,12 @@ function isClosedPath(path) {
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', () => {
     const shell = initializeAppShell(globalThis.document);
-    void initializeMapData(shell).catch((error) => {
-      console.error(error);
-    });
+    void initializeMapData(shell)
+      .then((mapData) => {
+        bindCanvasClickRouting(shell, mapData);
+      })
+      .catch((error) => {
+        console.error(error);
+      });
   });
 }

@@ -124,8 +124,10 @@ def test_app_js_has_time_sliced_search_contract() -> None:
 
     assert "export async function runSearchTimeSliced(" in app_js
     assert "const sliceBudgetMs = options.sliceBudgetMs ?? 8;" in app_js
+    assert "const isCancelled = options.isCancelled ?? (() => false);" in app_js
     assert "const requestAnimationFrameImpl = options.requestAnimationFrameImpl" in app_js
     assert "while (!isDone(searchState))" in app_js
+    assert "if (isCancelled()) {" in app_js
     assert "while (elapsedMs < sliceBudgetMs && !isDone(searchState))" in app_js
     assert "onSlice(settledBatch);" in app_js
     assert "await waitForAnimationFrame(requestAnimationFrameImpl);" in app_js
@@ -217,6 +219,22 @@ def test_app_js_has_nearest_node_and_highlight_contract() -> None:
     assert "const yPx = mapData.nodePixels.nodePixelY[nodeIndex];" in app_js
     assert "setPixel(mapData.pixelGrid, xPx, yPx, r, g, b, alpha);" in app_js
     assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
+
+
+def test_app_js_has_click_to_routing_wiring_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "export function bindCanvasClickRouting(" in app_js
+    assert "shell.isochroneCanvas.addEventListener('click', handleCanvasClick);" in app_js
+    assert "if (activeRunToken !== null) {" in app_js
+    assert "activeRunToken.cancelled = true;" in app_js
+    assert "const runToken = { cancelled: false };" in app_js
+    assert "clearGrid(mapData.pixelGrid);" in app_js
+    assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
+    assert "findNearestNodeForCanvasPixel(mapData, xPx, yPx);" in app_js
+    assert "highlightNodeIndexOnIsochroneCanvas(shell, mapData, nearest.nodeIndex);" in app_js
+    assert "isCancelled: () => runToken.cancelled," in app_js
+    assert "return { dispose, runFromCanvasPixel };" in app_js
 
 
 def test_styles_prevent_zero_height_map_region() -> None:
