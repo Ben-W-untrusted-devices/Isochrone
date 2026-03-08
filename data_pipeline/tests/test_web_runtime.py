@@ -71,7 +71,8 @@ def test_app_js_has_node_pixel_index_contract() -> None:
     assert "const xM = graph.nodeI32[nodeIndex * 4];" in app_js
     assert "const yM = graph.nodeI32[nodeIndex * 4 + 1];" in app_js
     assert "const pxX = Math.floor(xM / pixelSizeM);" in app_js
-    assert "const pxY = Math.floor(yM / pixelSizeM);" in app_js
+    assert "const yCellsFromSouth = Math.floor(yM / pixelSizeM);" in app_js
+    assert "const pxY = maxY - yCellsFromSouth;" in app_js
     assert "const nodePixels = precomputeNodePixelCoordinates(graph);" in app_js
 
 
@@ -204,7 +205,8 @@ def test_app_js_has_canvas_pixel_to_graph_coordinate_contract() -> None:
 
     assert "export function mapCanvasPixelToGraphMeters(" in app_js
     assert "graph.header.originEasting + xPx * graph.header.pixelSizeM" in app_js
-    assert "graph.header.originNorthing + yPx * graph.header.pixelSizeM" in app_js
+    assert "graph.header.originNorthing + (graph.header.gridHeightPx - 1 - yPx)" in app_js
+    assert "* graph.header.pixelSizeM" in app_js
     assert "return { easting, northing };" in app_js
 
 
@@ -250,6 +252,23 @@ def test_app_js_has_click_to_routing_wiring_contract() -> None:
         "shell.timeLimitMinutesInput.removeEventListener('input', handleTimeLimitInput);" in app_js
     )
     assert "return { dispose, runFromCanvasPixel };" in app_js
+
+
+def test_app_js_has_boundary_graph_alignment_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "export function drawBoundaryBasemapAlignedToGraphGrid(" in app_js
+    assert "const easting = parsedBoundary.coordinateSpace.xOrigin + point[0];" in app_js
+    assert "const northing = parsedBoundary.coordinateSpace.yOrigin - point[1];" in app_js
+    assert "const xPx = (easting - graphHeader.originEasting) / graphHeader.pixelSizeM;" in app_js
+    assert (
+        "const yPx = maxY - (northing - graphHeader.originNorthing) / graphHeader.pixelSizeM;"
+        in app_js
+    )
+    assert "boundaryCanvas.width = graphHeader.gridWidthPx;" in app_js
+    assert "boundaryCanvas.height = graphHeader.gridHeightPx;" in app_js
+    assert "drawBoundaryBasemapAlignedToGraphGrid(" in app_js
+    assert "boundaryLoad.boundaryPayload," in app_js
 
 
 def test_styles_prevent_zero_height_map_region() -> None:

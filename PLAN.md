@@ -562,7 +562,7 @@ Estimated time: 45 min
 Estimated time: 20 min
 
 Tasks
-- [x] Canvas pixel (px, py) → UTM: `easting = origin_easting + px * 10`, `northing = origin_northing + py * 10` (matches the graph raster axis convention used by node pixel coordinates)
+- [x] Canvas pixel (px, py) → UTM: `easting = origin_easting + px * 10`, `northing = origin_northing + (grid_height - 1 - py) * 10` (y-axis inversion so north remains up on canvas)
 - [x] No library needed; pure arithmetic
 
 ### 9.1.2 Find nearest graph node

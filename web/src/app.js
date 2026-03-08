@@ -353,7 +353,8 @@ export function mapCanvasPixelToGraphMeters(graph, xPx, yPx) {
   }
 
   const easting = graph.header.originEasting + xPx * graph.header.pixelSizeM;
-  const northing = graph.header.originNorthing + yPx * graph.header.pixelSizeM;
+  const northing =
+    graph.header.originNorthing + (graph.header.gridHeightPx - 1 - yPx) * graph.header.pixelSizeM;
 
   return { easting, northing };
 }
@@ -746,9 +747,16 @@ export function parseBoundaryBasemapPayload(payload) {
 
   const width = asFiniteNumber(coordinateSpace.width, 'coordinate_space.width');
   const height = asFiniteNumber(coordinateSpace.height, 'coordinate_space.height');
+  const xOrigin = asFiniteNumber(coordinateSpace.x_origin, 'coordinate_space.x_origin');
+  const yOrigin = asFiniteNumber(coordinateSpace.y_origin, 'coordinate_space.y_origin');
+  const axis =
+    typeof coordinateSpace.axis === 'string' ? coordinateSpace.axis : 'x-right-y-down';
 
   if (width <= 0 || height <= 0) {
     throw new Error('coordinate_space width/height must be positive');
+  }
+  if (axis !== 'x-right-y-down') {
+    throw new Error(`unsupported boundary coordinate_space.axis: ${axis}`);
   }
 
   const rawFeatures = payload.features;
@@ -800,8 +808,11 @@ export function parseBoundaryBasemapPayload(payload) {
 
   return {
     coordinateSpace: {
+      xOrigin,
+      yOrigin,
       width,
       height,
+      axis,
     },
     features,
   };
@@ -886,6 +897,68 @@ export function drawBoundaryBasemap(boundaryCanvas, payload) {
   };
 }
 
+export function drawBoundaryBasemapAlignedToGraphGrid(boundaryCanvas, payload, graphHeader) {
+  if (!boundaryCanvas || typeof boundaryCanvas.getContext !== 'function') {
+    throw new Error('boundaryCanvas must provide getContext("2d")');
+  }
+  validateGraphHeaderForBoundaryAlignment(graphHeader);
+
+  const parsedBoundary = parseBoundaryBasemapPayload(payload);
+  const context = boundaryCanvas.getContext('2d');
+  if (!context) {
+    throw new Error('Unable to get 2D context for boundary canvas');
+  }
+
+  boundaryCanvas.width = graphHeader.gridWidthPx;
+  boundaryCanvas.height = graphHeader.gridHeightPx;
+
+  context.clearRect(0, 0, boundaryCanvas.width, boundaryCanvas.height);
+  context.fillStyle = 'rgba(19, 94, 137, 0.10)';
+  context.strokeStyle = 'rgba(19, 94, 137, 0.85)';
+  context.lineWidth = 1.2;
+  context.lineJoin = 'round';
+  context.lineCap = 'round';
+
+  const maxY = graphHeader.gridHeightPx - 1;
+  let renderedPathCount = 0;
+
+  for (const feature of parsedBoundary.features) {
+    for (const path of feature.paths) {
+      if (path.length < 2) {
+        continue;
+      }
+
+      context.beginPath();
+      for (let i = 0; i < path.length; i += 1) {
+        const point = path[i];
+        const easting = parsedBoundary.coordinateSpace.xOrigin + point[0];
+        const northing = parsedBoundary.coordinateSpace.yOrigin - point[1];
+        const xPx = (easting - graphHeader.originEasting) / graphHeader.pixelSizeM;
+        const yPx = maxY - (northing - graphHeader.originNorthing) / graphHeader.pixelSizeM;
+
+        if (i === 0) {
+          context.moveTo(xPx, yPx);
+        } else {
+          context.lineTo(xPx, yPx);
+        }
+      }
+
+      if (isClosedPath(path)) {
+        context.closePath();
+        context.fill();
+      }
+
+      context.stroke();
+      renderedPathCount += 1;
+    }
+  }
+
+  return {
+    featureCount: parsedBoundary.features.length,
+    pathCount: renderedPathCount,
+  };
+}
+
 export async function loadAndRenderBoundaryBasemap(shell, options = {}) {
   const url = options.url ?? DEFAULT_BOUNDARY_BASEMAP_URL;
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
@@ -906,7 +979,10 @@ export async function loadAndRenderBoundaryBasemap(shell, options = {}) {
     const renderSummary = drawBoundaryBasemap(shell.boundaryCanvas, payload);
 
     showLoadingOverlay(shell, 'Loading graph: 0.00 MB', 0);
-    return renderSummary;
+    return {
+      boundaryPayload: payload,
+      renderSummary,
+    };
   } catch (error) {
     showLoadingOverlay(shell, 'Failed to load district boundaries.', 0);
     throw error;
@@ -1081,8 +1157,13 @@ export async function initializeMapData(shell, options = {}) {
   const graphOptions = options.graph ?? {};
 
   try {
-    const boundarySummary = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
+    const boundaryLoad = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
     const graph = await loadGraphBinary(shell, graphOptions);
+    const alignedBoundarySummary = drawBoundaryBasemapAlignedToGraphGrid(
+      shell.boundaryCanvas,
+      boundaryLoad.boundaryPayload,
+      graph.header,
+    );
     hideLoadingOverlay(shell);
 
     const nodePixels = precomputeNodePixelCoordinates(graph);
@@ -1090,7 +1171,8 @@ export async function initializeMapData(shell, options = {}) {
     clearGrid(pixelGrid);
 
     return {
-      boundarySummary,
+      boundarySummary: boundaryLoad.renderSummary,
+      alignedBoundarySummary,
       graph,
       nodePixels,
       pixelGrid,
@@ -1122,7 +1204,8 @@ export function precomputeNodePixelCoordinates(graph) {
     const xM = graph.nodeI32[nodeIndex * 4];
     const yM = graph.nodeI32[nodeIndex * 4 + 1];
     const pxX = Math.floor(xM / pixelSizeM);
-    const pxY = Math.floor(yM / pixelSizeM);
+    const yCellsFromSouth = Math.floor(yM / pixelSizeM);
+    const pxY = maxY - yCellsFromSouth;
 
     nodePixelX[nodeIndex] = clampInt(pxX, 0, maxX);
     nodePixelY[nodeIndex] = clampInt(pxY, 0, maxY);
@@ -1654,6 +1737,27 @@ function validateGraphForRouting(graph) {
   }
   if (graph.edgeU16.length < graph.header.nEdges * 6) {
     throw new Error('graph.edgeU16 is too short for edge records');
+  }
+}
+
+function validateGraphHeaderForBoundaryAlignment(graphHeader) {
+  if (!graphHeader || typeof graphHeader !== 'object') {
+    throw new Error('graphHeader must be an object');
+  }
+  if (!Number.isFinite(graphHeader.originEasting)) {
+    throw new Error('graphHeader.originEasting must be finite');
+  }
+  if (!Number.isFinite(graphHeader.originNorthing)) {
+    throw new Error('graphHeader.originNorthing must be finite');
+  }
+  if (!Number.isInteger(graphHeader.gridWidthPx) || graphHeader.gridWidthPx <= 0) {
+    throw new Error('graphHeader.gridWidthPx must be a positive integer');
+  }
+  if (!Number.isInteger(graphHeader.gridHeightPx) || graphHeader.gridHeightPx <= 0) {
+    throw new Error('graphHeader.gridHeightPx must be a positive integer');
+  }
+  if (!Number.isFinite(graphHeader.pixelSizeM) || graphHeader.pixelSizeM <= 0) {
+    throw new Error('graphHeader.pixelSizeM must be a positive finite number');
   }
 }
 
