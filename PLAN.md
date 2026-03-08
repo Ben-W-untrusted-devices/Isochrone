@@ -509,9 +509,9 @@ Tasks
 Estimated time: 45 min
 
 Tasks
-- `MinHeap` class: `push(nodeIndex, cost)`, `pop() → {nodeIndex, cost}`, `decreaseKey(nodeIndex, newCost)`
-- Internal storage: `Float64Array` for costs, `Int32Array` for node indices, `Int32Array` for position lookup (required for decreaseKey)
-- Unit test: insert 1000 random elements, confirm pop order is non-decreasing
+- [x] `MinHeap` class: `push(nodeIndex, cost)`, `pop() → {nodeIndex, cost}`, `decreaseKey(nodeIndex, newCost)`
+- [x] Internal storage: `Float64Array` for costs, `Int32Array` for node indices, `Int32Array` for position lookup (required for decreaseKey)
+- [x] Unit test: insert 1000 random elements, confirm pop order is non-decreasing
 
 ---
 

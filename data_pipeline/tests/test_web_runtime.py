@@ -147,6 +147,20 @@ def test_app_js_has_routing_status_text_contract() -> None:
     assert "setRoutingStatus(shell, formatRoutingStatusDone(doneMinutes));" in app_js
 
 
+def test_app_js_has_min_heap_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "export class MinHeap" in app_js
+    assert "this.costs = new Float64Array(" in app_js
+    assert "this.nodeIndices = new Int32Array(" in app_js
+    assert "this.positionLookup = new Int32Array(" in app_js
+    assert "push(nodeIndex, cost)" in app_js
+    assert "pop()" in app_js
+    assert "decreaseKey(nodeIndex, newCost)" in app_js
+    assert "runMinHeapSelfTest" in app_js
+    assert "for (let i = 0; i < 1000; i += 1)" in app_js
+
+
 def test_styles_prevent_zero_height_map_region() -> None:
     styles_css = (WEB_ROOT / "src" / "styles.css").read_text(encoding="utf-8")
 
