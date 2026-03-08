@@ -107,7 +107,7 @@ Estimated time: 45 min
 | Offset | Type    | Field             |
 |--------|---------|-------------------|
 | 0      | uint32  | magic `0x49534F43` ("ISOC") |
-| 4      | uint8   | version (=1)      |
+| 4      | uint8   | version (=2)      |
 | 5      | uint8   | flags (bit 0 = has_transit) |
 | 6      | uint16  | reserved          |
 | 8      | uint32  | N_nodes           |
@@ -138,14 +138,16 @@ Estimated time: 45 min
 | 12     | uint16 | edge_count |
 | 14     | uint16 | flags (bit 0 = is_stop_attachment) |
 
-### Edge record (12 bytes)
+### Edge record (12 bytes, v2)
 
 | Offset | Type   | Field |
 |--------|--------|-------|
 | 0      | uint32 | target_node_index |
 | 4      | uint16 | cost_seconds (walking, uint16 → max ~18 min per edge, sufficient) |
 | 6      | uint16 | flags |
-| 8      | uint32 | reserved |
+| 8      | uint32 | packed metadata: bits 0..7 `mode_mask`, bits 8..15 `road_class_id`, bits 16..31 `maxspeed_kph` |
+
+*Tooling reads both v1 and v2. Writers emit v2.*
 
 ### Stop record (24 bytes, post-MVP)
 
@@ -634,8 +636,8 @@ Estimated time: 4 hours 30 min
 Estimated time: 45 min
 
 Tasks
-- [ ] Bump binary format version (`version = 2`) and document backward compatibility policy (v1 read support in tooling; web runtime can require v2 once migrated)
-- [ ] Extend edge schema to include per-mode access and speed metadata (at minimum: `mode_mask`, `maxspeed_kph`, `road_class_id`)
+- [x] Bump binary format version (`version = 2`) and document backward compatibility policy (v1 read support in tooling; web runtime can require v2 once migrated)
+- [x] Extend edge schema to include per-mode access and speed metadata (at minimum: `mode_mask`, `maxspeed_kph`, `road_class_id`)
 - [ ] Decide and document cost storage strategy:
   - [ ] Option A: store per-mode precomputed edge costs (`walk_s`, `bike_s`, `car_s`)
   - [ ] Option B: store distance + speed metadata and compute mode costs at runtime

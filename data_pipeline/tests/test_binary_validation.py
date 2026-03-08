@@ -40,7 +40,7 @@ def test_validate_binary_graph_payload_accepts_valid_payload() -> None:
 
     result = validate_binary_graph_payload(payload, node_sample_count=2, random_seed=1)
 
-    assert result.header.version == 1
+    assert result.header.version == 2
     assert result.sampled_node_count == 2
     assert result.edge_target_violations == 0
     assert all(
@@ -52,10 +52,19 @@ def test_validate_binary_graph_payload_accepts_valid_payload() -> None:
 
 def test_validate_binary_graph_payload_rejects_wrong_version() -> None:
     payload = bytearray(export_graph_binary_bytes(_graph(), projection=_projection()))
-    payload[4] = 2
+    payload[4] = 9
 
     with pytest.raises(ValueError, match="unsupported version"):
         validate_binary_graph_payload(bytes(payload))
+
+
+def test_validate_binary_graph_payload_accepts_legacy_v1_header() -> None:
+    payload = bytearray(export_graph_binary_bytes(_graph(), projection=_projection()))
+    payload[4] = 1
+
+    result = validate_binary_graph_payload(bytes(payload), node_sample_count=1, random_seed=2)
+
+    assert result.header.version == 1
 
 
 def test_validate_binary_graph_payload_rejects_out_of_range_edge_target() -> None:

@@ -1,4 +1,4 @@
-"""Binary graph export for the MVP walking-only schema."""
+"""Binary graph export for graph schema v2."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from .binary_reader import EDGE_RECORD_SIZE, HEADER_SIZE, MAGIC, NODE_RECORD_SIZ
 from .binary_writer import BinaryWriter
 from .projection import ProjectionResult
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 TRANSIT_FLAG_BIT = 1 << 0
 
 
@@ -79,7 +79,13 @@ def export_graph_binary_bytes(
         writer.write_u32(edge.target_index)
         writer.write_u16(edge.cost_seconds)
         writer.write_u16(edge.flags)
-        writer.write_u32(0)
+        writer.write_u32(
+            _pack_edge_metadata(
+                mode_mask=edge.mode_mask,
+                maxspeed_kph=edge.maxspeed_kph,
+                road_class_id=edge.road_class_id,
+            )
+        )
 
     # MVP: stops and transit edges are empty tables.
     return writer.to_bytes()
@@ -112,6 +118,20 @@ def _validate_adjacency_layout(graph: AdjacencyGraph) -> None:
                     f"source_index={edge.source_index} "
                     f"node_index={node_index}"
                 )
+            if edge.mode_mask <= 0 or edge.mode_mask > 0xFF:
+                raise ValueError(
+                    f"edge mode_mask out of range at edge_index={edge_index}: {edge.mode_mask}"
+                )
+            if edge.maxspeed_kph < 0 or edge.maxspeed_kph > 0xFFFF:
+                raise ValueError(
+                    "edge maxspeed_kph out of range at "
+                    f"edge_index={edge_index}: {edge.maxspeed_kph}"
+                )
+            if edge.road_class_id < 0 or edge.road_class_id > 0xFF:
+                raise ValueError(
+                    "edge road_class_id out of range at "
+                    f"edge_index={edge_index}: {edge.road_class_id}"
+                )
 
     gaps = [index for index, count in enumerate(coverage) if count == 0]
     overlaps = [index for index, count in enumerate(coverage) if count > 1]
@@ -122,3 +142,7 @@ def _validate_adjacency_layout(graph: AdjacencyGraph) -> None:
         raise ValueError(
             f"edge indices multiply referenced by node ranges: first_overlap={overlaps[0]}"
         )
+
+
+def _pack_edge_metadata(*, mode_mask: int, maxspeed_kph: int, road_class_id: int) -> int:
+    return (maxspeed_kph << 16) | (road_class_id << 8) | mode_mask

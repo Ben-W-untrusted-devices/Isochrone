@@ -26,6 +26,9 @@ class _MutableEdge:
     target: int
     cost_seconds: int
     flags: int
+    mode_mask: int
+    maxspeed_kph: int
+    road_class_id: int
     alive: bool = True
 
 
@@ -61,6 +64,9 @@ def simplify_degree2_chains(
             target=edge.target_index,
             cost_seconds=min(edge.cost_seconds, MAX_EDGE_COST_SECONDS),
             flags=edge.flags,
+            mode_mask=edge.mode_mask,
+            maxspeed_kph=edge.maxspeed_kph,
+            road_class_id=edge.road_class_id,
         )
         for edge in graph.edges
     ]
@@ -172,7 +178,7 @@ def _build_merge_plan(
     if not incoming or not outgoing:
         return None
 
-    replacement_costs: dict[tuple[int, int, int], int] = {}
+    replacement_costs: dict[tuple[int, int, int, int, int, int], int] = {}
     has_non_loop_pair = False
 
     for in_edge_id in incoming:
@@ -187,7 +193,21 @@ def _build_merge_plan(
                 return None
 
             merged_flags = in_edge.flags | out_edge.flags
-            key = (in_edge.source, out_edge.target, merged_flags)
+            merged_mode_mask = in_edge.mode_mask & out_edge.mode_mask
+            if merged_mode_mask == 0:
+                continue
+            merged_maxspeed_kph = _merge_maxspeed_kph(in_edge.maxspeed_kph, out_edge.maxspeed_kph)
+            merged_road_class_id = (
+                in_edge.road_class_id if in_edge.road_class_id == out_edge.road_class_id else 0
+            )
+            key = (
+                in_edge.source,
+                out_edge.target,
+                merged_flags,
+                merged_mode_mask,
+                merged_maxspeed_kph,
+                merged_road_class_id,
+            )
             replacement_costs[key] = min(replacement_costs.get(key, merged_cost), merged_cost)
 
     if not has_non_loop_pair:
@@ -199,8 +219,18 @@ def _build_merge_plan(
             target_index=target,
             cost_seconds=cost,
             flags=flags,
+            mode_mask=mode_mask,
+            maxspeed_kph=maxspeed_kph,
+            road_class_id=road_class_id,
         )
-        for (source, target, flags), cost in replacement_costs.items()
+        for (
+            source,
+            target,
+            flags,
+            mode_mask,
+            maxspeed_kph,
+            road_class_id,
+        ), cost in replacement_costs.items()
     )
 
     if not replacements:
@@ -244,6 +274,9 @@ def _apply_merge_plan(
                 target=replacement.target_index,
                 cost_seconds=replacement.cost_seconds,
                 flags=replacement.flags,
+                mode_mask=replacement.mode_mask,
+                maxspeed_kph=replacement.maxspeed_kph,
+                road_class_id=replacement.road_class_id,
             )
         )
         outgoing_ids[replacement.source_index].add(new_edge_id)
@@ -274,7 +307,7 @@ def _reindex_graph(
         old_to_new[old_index] = len(new_nodes)
         new_nodes.append(replace(node, first_edge_index=0, edge_count=0))
 
-    deduped_costs: dict[tuple[int, int, int], int] = {}
+    deduped_costs: dict[tuple[int, int, int, int, int, int], int] = {}
 
     for edge in edges:
         if not edge.alive:
@@ -284,7 +317,14 @@ def _reindex_graph(
 
         source_index = old_to_new[edge.source]
         target_index = old_to_new[edge.target]
-        key = (source_index, target_index, edge.flags)
+        key = (
+            source_index,
+            target_index,
+            edge.flags,
+            edge.mode_mask,
+            edge.maxspeed_kph,
+            edge.road_class_id,
+        )
         deduped_costs[key] = min(
             deduped_costs.get(key, edge.cost_seconds),
             min(edge.cost_seconds, MAX_EDGE_COST_SECONDS),
@@ -292,7 +332,14 @@ def _reindex_graph(
 
     sorted_edges = sorted(
         deduped_costs.items(),
-        key=lambda item: (item[0][0], item[0][1], item[0][2]),
+        key=lambda item: (
+            item[0][0],
+            item[0][1],
+            item[0][2],
+            item[0][3],
+            item[0][4],
+            item[0][5],
+        ),
     )
     new_edges = [
         GraphEdge(
@@ -300,8 +347,18 @@ def _reindex_graph(
             target_index=target,
             cost_seconds=cost,
             flags=flags,
+            mode_mask=mode_mask,
+            maxspeed_kph=maxspeed_kph,
+            road_class_id=road_class_id,
         )
-        for (source, target, flags), cost in sorted_edges
+        for (
+            source,
+            target,
+            flags,
+            mode_mask,
+            maxspeed_kph,
+            road_class_id,
+        ), cost in sorted_edges
     ]
 
     i = 0
@@ -323,3 +380,11 @@ def _reindex_graph(
         edges=tuple(new_edges),
         skipped_constraint_way_count=skipped_constraint_way_count,
     )
+
+
+def _merge_maxspeed_kph(first: int, second: int) -> int:
+    if first <= 0:
+        return max(0, second)
+    if second <= 0:
+        return max(0, first)
+    return min(first, second)

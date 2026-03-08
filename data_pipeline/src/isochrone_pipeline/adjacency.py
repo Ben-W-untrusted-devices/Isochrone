@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, replace
 
 from .osm_graph_extract import WalkableGraphExtract, WayCandidate
@@ -17,6 +18,28 @@ NODE_FLAG_ENTRANCE = 1 << 2
 NODE_FLAG_BARRIER = 1 << 3
 
 EDGE_FLAG_SIDEWALK_PRESENT = 1 << 0
+
+MODE_MASK_WALK = 1 << 0
+MODE_MASK_BIKE = 1 << 1
+MODE_MASK_CAR = 1 << 2
+
+ROAD_CLASS_BY_HIGHWAY: dict[str, int] = {
+    "footway": 1,
+    "path": 2,
+    "pedestrian": 3,
+    "steps": 4,
+    "living_street": 5,
+    "residential": 6,
+    "service": 7,
+    "cycleway": 8,
+    "track": 9,
+    "unclassified": 10,
+    "tertiary": 11,
+    "secondary": 12,
+    "primary": 13,
+    "trunk": 14,
+    "motorway": 15,
+}
 
 
 @dataclass(frozen=True)
@@ -35,6 +58,9 @@ class GraphEdge:
     target_index: int
     cost_seconds: int
     flags: int
+    mode_mask: int = MODE_MASK_WALK
+    maxspeed_kph: int = 0
+    road_class_id: int = 0
 
 
 @dataclass(frozen=True)
@@ -78,14 +104,31 @@ class _AdjacencyBuilder:
 
             oneway_foot = way.constraints.get("oneway:foot") == "yes"
             edge_flags = _edge_flags(way)
+            edge_mode_mask = _mode_mask_for_way(way)
+            edge_maxspeed_kph = _maxspeed_kph_for_way(way)
+            edge_road_class_id = _road_class_id_for_way(way.highway)
 
             for src_osm_id, dst_osm_id in zip(way.node_ids, way.node_ids[1:], strict=False):
                 src_index = self._osm_id_to_index[src_osm_id]
                 dst_index = self._osm_id_to_index[dst_osm_id]
 
-                self._add_directed_edge_with_splitting(src_index, dst_index, edge_flags)
+                self._add_directed_edge_with_splitting(
+                    src_index,
+                    dst_index,
+                    edge_flags,
+                    edge_mode_mask,
+                    edge_maxspeed_kph,
+                    edge_road_class_id,
+                )
                 if not oneway_foot:
-                    self._add_directed_edge_with_splitting(dst_index, src_index, edge_flags)
+                    self._add_directed_edge_with_splitting(
+                        dst_index,
+                        src_index,
+                        edge_flags,
+                        edge_mode_mask,
+                        edge_maxspeed_kph,
+                        edge_road_class_id,
+                    )
 
         sorted_edges = sorted(self._edges, key=lambda edge: (edge.source_index, edge.target_index))
 
@@ -120,6 +163,9 @@ class _AdjacencyBuilder:
         source_index: int,
         target_index: int,
         flags: int,
+        mode_mask: int,
+        maxspeed_kph: int,
+        road_class_id: int,
     ) -> None:
         source = self._node_positions[source_index]
         target = self._node_positions[target_index]
@@ -130,6 +176,9 @@ class _AdjacencyBuilder:
             target_index=target_index,
             target_xy=target,
             flags=flags,
+            mode_mask=mode_mask,
+            maxspeed_kph=maxspeed_kph,
+            road_class_id=road_class_id,
         )
 
     def _add_segment_recursive(
@@ -139,6 +188,9 @@ class _AdjacencyBuilder:
         target_index: int,
         target_xy: tuple[float, float],
         flags: int,
+        mode_mask: int,
+        maxspeed_kph: int,
+        road_class_id: int,
     ) -> None:
         distance_m = math.hypot(target_xy[0] - source_xy[0], target_xy[1] - source_xy[1])
         cost_seconds = max(1, int(round(distance_m / WALKING_SPEED_M_S)))
@@ -150,6 +202,9 @@ class _AdjacencyBuilder:
                     target_index=target_index,
                     cost_seconds=cost_seconds,
                     flags=flags,
+                    mode_mask=mode_mask,
+                    maxspeed_kph=maxspeed_kph,
+                    road_class_id=road_class_id,
                 )
             )
             return
@@ -164,6 +219,9 @@ class _AdjacencyBuilder:
                     target_index=target_index,
                     cost_seconds=capped_cost,
                     flags=flags,
+                    mode_mask=mode_mask,
+                    maxspeed_kph=maxspeed_kph,
+                    road_class_id=road_class_id,
                 )
             )
             return
@@ -175,6 +233,9 @@ class _AdjacencyBuilder:
             target_index=midpoint_index,
             target_xy=midpoint_xy,
             flags=flags,
+            mode_mask=mode_mask,
+            maxspeed_kph=maxspeed_kph,
+            road_class_id=road_class_id,
         )
         self._add_segment_recursive(
             source_index=midpoint_index,
@@ -182,6 +243,9 @@ class _AdjacencyBuilder:
             target_index=target_index,
             target_xy=target_xy,
             flags=flags,
+            mode_mask=mode_mask,
+            maxspeed_kph=maxspeed_kph,
+            road_class_id=road_class_id,
         )
 
     def _append_synthetic_node(self, xy: tuple[float, float]) -> int:
@@ -248,3 +312,30 @@ def _connector_flags(extracted: WalkableGraphExtract, osm_id: int) -> int:
             flags |= NODE_FLAG_BARRIER
 
     return flags
+
+
+def _mode_mask_for_way(_way: WayCandidate) -> int:
+    # Multimodal semantics land in Phase 10.4.3; v2 writes walk support explicitly now.
+    return MODE_MASK_WALK
+
+
+def _maxspeed_kph_for_way(way: WayCandidate) -> int:
+    raw = way.constraints.get("maxspeed")
+    if raw is None:
+        return 0
+
+    match = re.match(r"^\s*(\d+(?:\.\d+)?)\s*(km/h|kph|mph)?\s*$", raw.lower())
+    if match is None:
+        return 0
+
+    value = float(match.group(1))
+    unit = match.group(2) or "km/h"
+    if unit == "mph":
+        value *= 1.60934
+
+    rounded = int(round(value))
+    return max(0, min(rounded, 65535))
+
+
+def _road_class_id_for_way(highway: str) -> int:
+    return ROAD_CLASS_BY_HIGHWAY.get(highway, 0)

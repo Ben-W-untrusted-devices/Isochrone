@@ -8,7 +8,14 @@ from pathlib import Path
 from .osm_json_survey import iter_overpass_elements
 from .overpass_survey import WALKABLE_HIGHWAY_VALUES
 
-CONSTRAINT_TAGS: tuple[str, ...] = ("access", "foot", "oneway", "oneway:foot", "sidewalk")
+CONSTRAINT_TAGS: tuple[str, ...] = (
+    "access",
+    "foot",
+    "oneway",
+    "oneway:foot",
+    "sidewalk",
+    "maxspeed",
+)
 
 
 @dataclass(frozen=True)

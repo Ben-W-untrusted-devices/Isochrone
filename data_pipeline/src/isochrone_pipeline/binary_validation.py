@@ -18,7 +18,7 @@ from .binary_reader import (
     validate_offsets,
 )
 
-EXPECTED_VERSION = 1
+SUPPORTED_VERSIONS = frozenset({1, 2})
 
 
 @dataclass(frozen=True)
@@ -72,8 +72,11 @@ def validate_binary_graph_payload(
     if header.magic != MAGIC:
         raise ValueError(f"invalid magic 0x{header.magic:08X}; expected 0x{MAGIC:08X}")
 
-    if header.version != EXPECTED_VERSION:
-        raise ValueError(f"unsupported version {header.version}; expected {EXPECTED_VERSION}")
+    if header.version not in SUPPORTED_VERSIONS:
+        supported = ",".join(str(version) for version in sorted(SUPPORTED_VERSIONS))
+        raise ValueError(
+            f"unsupported version {header.version}; supported versions are {supported}"
+        )
 
     node_spot_checks = _sample_nodes_within_berlin_bbox(
         payload,

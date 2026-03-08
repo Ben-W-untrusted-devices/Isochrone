@@ -34,8 +34,24 @@ def test_export_graph_binary_bytes_writes_header_nodes_and_edges() -> None:
             GraphNode(osm_id=3, x_m=20, y_m=0, first_edge_index=2, edge_count=0, flags=0),
         ),
         edges=(
-            GraphEdge(source_index=0, target_index=1, cost_seconds=7, flags=2),
-            GraphEdge(source_index=1, target_index=2, cost_seconds=9, flags=4),
+            GraphEdge(
+                source_index=0,
+                target_index=1,
+                cost_seconds=7,
+                flags=2,
+                mode_mask=0b0000_0111,
+                maxspeed_kph=50,
+                road_class_id=9,
+            ),
+            GraphEdge(
+                source_index=1,
+                target_index=2,
+                cost_seconds=9,
+                flags=4,
+                mode_mask=0b0000_0001,
+                maxspeed_kph=20,
+                road_class_id=3,
+            ),
         ),
         skipped_constraint_way_count=0,
     )
@@ -43,7 +59,7 @@ def test_export_graph_binary_bytes_writes_header_nodes_and_edges() -> None:
     payload = export_graph_binary_bytes(graph, projection=_projection())
 
     header = parse_header(payload)
-    assert header.version == 1
+    assert header.version == 2
     assert header.flags == 0
     assert header.n_nodes == 3
     assert header.n_edges == 2
@@ -75,11 +91,16 @@ def test_export_graph_binary_bytes_writes_header_nodes_and_edges() -> None:
     assert edge0.target_node_index == 1
     assert edge0.cost_seconds == 7
     assert edge0.flags == 2
-    assert edge0.reserved == 0
+    assert edge0.mode_mask == 0b0000_0111
+    assert edge0.maxspeed_kph == 50
+    assert edge0.road_class_id == 9
 
     assert edge1.target_node_index == 2
     assert edge1.cost_seconds == 9
     assert edge1.flags == 4
+    assert edge1.mode_mask == 0b0000_0001
+    assert edge1.maxspeed_kph == 20
+    assert edge1.road_class_id == 3
 
 
 def test_export_graph_binary_bytes_rejects_invalid_node_edge_layout() -> None:

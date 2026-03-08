@@ -47,6 +47,9 @@ class EdgeRecord:
     cost_seconds: int
     flags: int
     reserved: int
+    mode_mask: int
+    maxspeed_kph: int
+    road_class_id: int
 
 
 def parse_header(buffer: bytes | bytearray | memoryview) -> GraphHeader:
@@ -113,11 +116,15 @@ def parse_edge_record(buffer: bytes | bytearray | memoryview, offset: int) -> Ed
         raise ValueError(f"Edge record offset out of range: {offset}")
 
     target_node_index, cost_seconds, flags, reserved = struct.unpack_from("<IHHI", buffer, offset)
+    mode_mask, maxspeed_kph, road_class_id = unpack_edge_metadata(reserved)
     return EdgeRecord(
         target_node_index=target_node_index,
         cost_seconds=cost_seconds,
         flags=flags,
         reserved=reserved,
+        mode_mask=mode_mask,
+        maxspeed_kph=maxspeed_kph,
+        road_class_id=road_class_id,
     )
 
 
@@ -183,3 +190,10 @@ def summarize_graph_file(path: Path) -> list[str]:
         lines.append("edge0=<none>")
 
     return lines
+
+
+def unpack_edge_metadata(packed: int) -> tuple[int, int, int]:
+    mode_mask = packed & 0xFF
+    road_class_id = (packed >> 8) & 0xFF
+    maxspeed_kph = (packed >> 16) & 0xFFFF
+    return mode_mask, maxspeed_kph, road_class_id

@@ -22,6 +22,7 @@ def _build_graph_bytes(
     node_table_offset: int = HEADER_SIZE,
     edge_table_offset: int = HEADER_SIZE + NODE_RECORD_SIZE,
     stop_table_offset: int = HEADER_SIZE + NODE_RECORD_SIZE + EDGE_RECORD_SIZE,
+    edge_metadata: int = 0,
 ) -> bytes:
     writer = BinaryWriter()
 
@@ -63,7 +64,7 @@ def _build_graph_bytes(
         writer.write_u32(0)
         writer.write_u16(42)
         writer.write_u16(0)
-        writer.write_u32(0)
+        writer.write_u32(edge_metadata)
 
     while writer.offset < stop_table_offset:
         writer.write_u8(0)
@@ -86,6 +87,16 @@ def test_parse_header_and_records() -> None:
     assert node.y_m == 20
     assert edge.target_node_index == 0
     assert edge.cost_seconds == 42
+
+
+def test_parse_edge_record_unpacks_mode_speed_and_road_class() -> None:
+    # bits: [31..16]=maxspeed_kph, [15..8]=road_class_id, [7..0]=mode_mask
+    payload = _build_graph_bytes(edge_metadata=(80 << 16) | (12 << 8) | 0b0000_0111)
+    edge = parse_edge_record(payload, HEADER_SIZE + NODE_RECORD_SIZE)
+
+    assert edge.mode_mask == 0b0000_0111
+    assert edge.maxspeed_kph == 80
+    assert edge.road_class_id == 12
 
 
 def test_validate_offsets_rejects_inconsistent_offsets() -> None:
