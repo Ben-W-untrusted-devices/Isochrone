@@ -345,6 +345,21 @@ export function findNearestNodeIndex(graph, xM, yM) {
   return nearestNodeIndex;
 }
 
+export function mapCanvasPixelToGraphMeters(graph, xPx, yPx) {
+  validateGraphForRouting(graph);
+
+  if (!Number.isFinite(xPx) || !Number.isFinite(yPx)) {
+    throw new Error('xPx and yPx must be finite numbers');
+  }
+
+  const easting = graph.header.originEasting + xPx * graph.header.pixelSizeM;
+  // Canvas y grows downward while projected northing grows upward.
+  const northing =
+    graph.header.originNorthing + (graph.header.gridHeightPx - yPx) * graph.header.pixelSizeM;
+
+  return { easting, northing };
+}
+
 export async function runWalkingIsochroneFromSourceNode(
   shell,
   mapData,

@@ -562,8 +562,8 @@ Estimated time: 45 min
 Estimated time: 20 min
 
 Tasks
-- Canvas pixel (px, py) → UTM: `easting = origin_easting + px * 10`, `northing = origin_northing + (grid_height - py) * 10` (y-axis inversion: canvas y increases downward, northing increases upward)
-- No library needed; pure arithmetic
+- [x] Canvas pixel (px, py) → UTM: `easting = origin_easting + px * 10`, `northing = origin_northing + (grid_height - py) * 10` (y-axis inversion: canvas y increases downward, northing increases upward)
+- [x] No library needed; pure arithmetic
 
 ### 9.1.2 Find nearest graph node
 Estimated time: 25 min

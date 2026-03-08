@@ -189,6 +189,18 @@ def test_app_js_has_post_mvp_transit_stub_contract() -> None:
     assert "runPostMvpTransitStub(mapData.graph, searchState);" in app_js
 
 
+def test_app_js_has_canvas_pixel_to_graph_coordinate_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "export function mapCanvasPixelToGraphMeters(" in app_js
+    assert "graph.header.originEasting + xPx * graph.header.pixelSizeM" in app_js
+    assert (
+        "graph.header.originNorthing + (graph.header.gridHeightPx - yPx) * graph.header.pixelSizeM"
+        in app_js
+    )
+    assert "return { easting, northing };" in app_js
+
+
 def test_styles_prevent_zero_height_map_region() -> None:
     styles_css = (WEB_ROOT / "src" / "styles.css").read_text(encoding="utf-8")
 
