@@ -204,10 +204,7 @@ def test_app_js_has_canvas_pixel_to_graph_coordinate_contract() -> None:
 
     assert "export function mapCanvasPixelToGraphMeters(" in app_js
     assert "graph.header.originEasting + xPx * graph.header.pixelSizeM" in app_js
-    assert (
-        "graph.header.originNorthing + (graph.header.gridHeightPx - yPx) * graph.header.pixelSizeM"
-        in app_js
-    )
+    assert "graph.header.originNorthing + yPx * graph.header.pixelSizeM" in app_js
     assert "return { easting, northing };" in app_js
 
 

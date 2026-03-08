@@ -353,9 +353,7 @@ export function mapCanvasPixelToGraphMeters(graph, xPx, yPx) {
   }
 
   const easting = graph.header.originEasting + xPx * graph.header.pixelSizeM;
-  // Canvas y grows downward while projected northing grows upward.
-  const northing =
-    graph.header.originNorthing + (graph.header.gridHeightPx - yPx) * graph.header.pixelSizeM;
+  const northing = graph.header.originNorthing + yPx * graph.header.pixelSizeM;
 
   return { easting, northing };
 }
