@@ -778,13 +778,11 @@ export async function initializeMapData(shell, options = {}) {
   try {
     const boundarySummary = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
     const graph = await loadGraphBinary(shell, graphOptions);
+    hideLoadingOverlay(shell);
+
     const nodePixels = precomputeNodePixelCoordinates(graph);
     const pixelGrid = createPixelGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
     clearGrid(pixelGrid);
-    blitPixelGridToCanvas(shell.isochroneCanvas, pixelGrid);
-
-    showLoadingOverlay(shell, 'Loading graph: 100%', 100);
-    fadeOutLoadingOverlay(shell);
 
     return {
       boundarySummary,
@@ -1149,6 +1147,15 @@ function fadeOutLoadingOverlay(shell) {
     shell.loadingOverlay.classList.remove('is-fading');
     shell.loadingFadeTimeoutId = null;
   }, LOADING_FADE_MS);
+}
+
+function hideLoadingOverlay(shell) {
+  if (shell.loadingFadeTimeoutId !== null) {
+    clearTimeout(shell.loadingFadeTimeoutId);
+    shell.loadingFadeTimeoutId = null;
+  }
+  shell.loadingOverlay.hidden = true;
+  shell.loadingOverlay.classList.remove('is-fading');
 }
 
 function setLoadingProgressBar(progressBar, progressPercent) {
