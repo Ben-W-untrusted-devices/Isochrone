@@ -588,8 +588,8 @@ Tasks
 Estimated time: 20 min
 
 Tasks
-- `<input type="range" min="5" max="90" step="5">` for time limit in minutes, with numeric label
-- On change: re-run routing from last clicked node (debounced 200 ms)
+- [x] `<input type="range" min="5" max="90" step="5">` for time limit in minutes, with numeric label
+- [x] On change: re-run routing from last clicked node (debounced 200 ms)
 
 ---
 

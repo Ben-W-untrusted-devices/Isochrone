@@ -439,22 +439,61 @@ export function highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex, o
   return { nodeIndex, xPx, yPx };
 }
 
+export function readTimeLimitMinutes(timeLimitMinutesInput) {
+  if (!timeLimitMinutesInput || timeLimitMinutesInput.tagName !== 'INPUT') {
+    throw new Error('timeLimitMinutesInput must be an <input>');
+  }
+  if (timeLimitMinutesInput.type !== 'range') {
+    throw new Error('timeLimitMinutesInput must be type="range"');
+  }
+
+  const parsed = Number.parseInt(timeLimitMinutesInput.value, 10);
+  if (!Number.isFinite(parsed)) {
+    throw new Error('time limit input value must parse to a finite integer');
+  }
+  return clampInt(parsed, 5, 90);
+}
+
+function updateTimeLimitMinutesLabel(shell) {
+  const timeLimitMinutes = readTimeLimitMinutes(shell.timeLimitMinutesInput);
+  shell.timeLimitMinutesValue.textContent = `${timeLimitMinutes} min`;
+  return timeLimitMinutes;
+}
+
 export function bindCanvasClickRouting(shell, mapData, options = {}) {
   if (!shell || !shell.isochroneCanvas) {
     throw new Error('shell.isochroneCanvas is required');
+  }
+  if (!shell.timeLimitMinutesInput || !shell.timeLimitMinutesValue) {
+    throw new Error('shell time limit controls are required');
   }
   if (!mapData || typeof mapData !== 'object' || !mapData.graph) {
     throw new Error('mapData.graph is required');
   }
 
-  const timeLimitMinutes = options.timeLimitMinutes ?? 30;
-  const timeLimitSeconds = options.timeLimitSeconds ?? minutesToSeconds(timeLimitMinutes);
+  const timeLimitDebounceMs = options.timeLimitDebounceMs ?? 200;
+  if (!Number.isFinite(timeLimitDebounceMs) || timeLimitDebounceMs < 0) {
+    throw new Error('timeLimitDebounceMs must be a non-negative finite number');
+  }
+
   let activeRunToken = null;
+  let lastClickedNodeIndex = null;
+  let debounceTimeoutId = null;
   let isDisposed = false;
 
-  const runFromCanvasPixel = async (xPx, yPx) => {
+  const resolveTimeLimitMinutes = () => {
+    if (Number.isFinite(options.timeLimitMinutes)) {
+      return Math.max(1, Math.round(options.timeLimitMinutes));
+    }
+    return updateTimeLimitMinutesLabel(shell);
+  };
+
+  const runFromNodeIndex = async (nodeIndex) => {
     if (isDisposed) {
       throw new Error('routing click handler is disposed');
+    }
+    if (!Number.isInteger(nodeIndex) || nodeIndex < 0 || nodeIndex >= mapData.graph.header.nNodes) {
+      throw new Error(`nodeIndex out of range: ${nodeIndex}`);
     }
 
     if (activeRunToken !== null) {
@@ -466,15 +505,15 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
 
     clearGrid(mapData.pixelGrid);
     blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
-
-    const nearest = findNearestNodeForCanvasPixel(mapData, xPx, yPx);
-    highlightNodeIndexOnIsochroneCanvas(shell, mapData, nearest.nodeIndex);
+    highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);
 
     try {
+      const timeLimitMinutes = resolveTimeLimitMinutes();
+      const timeLimitSeconds = options.timeLimitSeconds ?? minutesToSeconds(timeLimitMinutes);
       const runSummary = await runWalkingIsochroneFromSourceNode(
         shell,
         mapData,
-        nearest.nodeIndex,
+        nodeIndex,
         timeLimitSeconds,
         {
           ...options,
@@ -488,7 +527,8 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
       }
 
       return {
-        ...nearest,
+        nodeIndex,
+        timeLimitMinutes,
         ...runSummary,
       };
     } catch (error) {
@@ -497,6 +537,17 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
       }
       throw error;
     }
+  };
+
+  const runFromCanvasPixel = async (xPx, yPx) => {
+    const nearest = findNearestNodeForCanvasPixel(mapData, xPx, yPx);
+    lastClickedNodeIndex = nearest.nodeIndex;
+    const runSummary = await runFromNodeIndex(nearest.nodeIndex);
+
+    return {
+      ...nearest,
+      ...runSummary,
+    };
   };
 
   const handleCanvasClick = (event) => {
@@ -511,7 +562,27 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     });
   };
 
+  const handleTimeLimitInput = () => {
+    updateTimeLimitMinutesLabel(shell);
+
+    if (lastClickedNodeIndex === null) {
+      return;
+    }
+    if (debounceTimeoutId !== null) {
+      clearTimeout(debounceTimeoutId);
+    }
+
+    debounceTimeoutId = setTimeout(() => {
+      debounceTimeoutId = null;
+      void runFromNodeIndex(lastClickedNodeIndex).catch((error) => {
+        setRoutingStatus(shell, 'Routing failed.');
+        console.error(error);
+      });
+    }, timeLimitDebounceMs);
+  };
+
   shell.isochroneCanvas.addEventListener('click', handleCanvasClick);
+  shell.timeLimitMinutesInput.addEventListener('input', handleTimeLimitInput);
 
   const dispose = () => {
     if (isDisposed) {
@@ -524,7 +595,13 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
       activeRunToken = null;
     }
 
+    if (debounceTimeoutId !== null) {
+      clearTimeout(debounceTimeoutId);
+      debounceTimeoutId = null;
+    }
+
     shell.isochroneCanvas.removeEventListener('click', handleCanvasClick);
+    shell.timeLimitMinutesInput.removeEventListener('input', handleTimeLimitInput);
   };
 
   return { dispose, runFromCanvasPixel };
@@ -602,6 +679,8 @@ export function initializeAppShell(doc) {
   const loadingText = resolvedDocument.getElementById('loading-text');
   const loadingProgressBar = resolvedDocument.getElementById('loading-progress-bar');
   const routingStatus = resolvedDocument.getElementById('routing-status');
+  const timeLimitMinutesInput = resolvedDocument.getElementById('time-limit-minutes');
+  const timeLimitMinutesValue = resolvedDocument.getElementById('time-limit-value');
 
   if (!isochroneCanvas || isochroneCanvas.tagName !== 'CANVAS') {
     throw new Error('index.html is missing <canvas id="isochrone">');
@@ -621,6 +700,15 @@ export function initializeAppShell(doc) {
   if (!routingStatus || routingStatus.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="routing-status">');
   }
+  if (!timeLimitMinutesInput || timeLimitMinutesInput.tagName !== 'INPUT') {
+    throw new Error('index.html is missing <input id="time-limit-minutes">');
+  }
+  if (timeLimitMinutesInput.type !== 'range') {
+    throw new Error('index.html time limit input must be type="range"');
+  }
+  if (!timeLimitMinutesValue || timeLimitMinutesValue.tagName !== 'OUTPUT') {
+    throw new Error('index.html is missing <output id="time-limit-value">');
+  }
 
   sizeCanvasToCssPixels(isochroneCanvas);
   sizeCanvasToCssPixels(boundaryCanvas);
@@ -632,6 +720,7 @@ export function initializeAppShell(doc) {
   loadingText.textContent = 'Loading district boundaries...';
   setLoadingProgressBar(loadingProgressBar, 0);
   routingStatus.textContent = 'Ready.';
+  timeLimitMinutesValue.textContent = `${readTimeLimitMinutes(timeLimitMinutesInput)} min`;
 
   return {
     isochroneCanvas,
@@ -641,6 +730,8 @@ export function initializeAppShell(doc) {
     loadingText,
     loadingProgressBar,
     routingStatus,
+    timeLimitMinutesInput,
+    timeLimitMinutesValue,
     loadingFadeTimeoutId: null,
   };
 }
