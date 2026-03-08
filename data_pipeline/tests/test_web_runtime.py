@@ -189,4 +189,5 @@ def test_styles_prevent_zero_height_map_region() -> None:
     assert "#loading-progress" in styles_css
     assert "#loading-progress-bar" in styles_css
     assert "#loading.is-fading" in styles_css
+    assert "#loading[hidden]" in styles_css
     assert "#routing-status" in styles_css

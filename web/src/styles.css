@@ -93,6 +93,10 @@ body {
   transition: opacity 180ms ease;
 }
 
+#loading[hidden] {
+  display: none !important;
+}
+
 #loading.is-fading {
   opacity: 0;
   pointer-events: none;
