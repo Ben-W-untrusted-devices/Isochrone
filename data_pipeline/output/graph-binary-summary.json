@@ -1,12 +1,12 @@
 {
-  "generated_at_utc": "2026-03-08T23:06:36.469707+00:00",
+  "generated_at_utc": "2026-03-09T14:54:52.088903+00:00",
   "input": "data_pipeline/input/berlin-routing.osm.json",
   "binary_output": "data_pipeline/output/graph-walk.bin",
-  "binary_size_bytes": 26203876,
+  "binary_size_bytes": 26215476,
   "before_node_count": 1240433,
-  "before_edge_count": 2760968,
-  "after_node_count": 573834,
-  "after_edge_count": 1418539,
+  "before_edge_count": 2764670,
+  "after_node_count": 572987,
+  "after_edge_count": 1420635,
   "constraint_tag_presence": {
     "access": 44353,
     "foot": 57095,
@@ -46,19 +46,27 @@
     "maxspeed:backward": 0.0002574753290785345
   },
   "edge_mode_mask_counts": {
-    "7": 597686,
-    "1": 697653,
-    "3": 117856,
-    "5": 5326,
-    "6": 16,
-    "2": 2
+    "7": 597826,
+    "1": 699025,
+    "3": 118436,
+    "5": 5348
+  },
+  "edge_mode_counts": {
+    "walk": 1420635,
+    "bike": 716262,
+    "car": 603174
+  },
+  "edge_mode_coverage_ratio": {
+    "walk": 1.0,
+    "bike": 0.5041843964142795,
+    "car": 0.4245805572860024
   },
   "header": {
     "magic": "0x49534F43",
     "version": 2,
     "flags": 0,
-    "n_nodes": 573834,
-    "n_edges": 1418539,
+    "n_nodes": 572987,
+    "n_edges": 1420635,
     "n_stops": 0,
     "n_tedges": 0,
     "origin_easting": 370035.4331555407,
@@ -68,7 +76,7 @@
     "grid_height_px": 3743,
     "pixel_size_m": 10.0,
     "node_table_offset": 64,
-    "edge_table_offset": 9181408,
-    "stop_table_offset": 26203876
+    "edge_table_offset": 9167856,
+    "stop_table_offset": 26215476
   }
 }
