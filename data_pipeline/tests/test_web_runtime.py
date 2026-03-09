@@ -219,6 +219,8 @@ def test_app_js_has_walking_dijkstra_contract() -> None:
     assert "const dy = nodeYM - yM;" in app_js
     assert "export async function runWalkingIsochroneFromSourceNode(" in app_js
     assert "const allowedModeMask = options.allowedModeMask ?? EDGE_MODE_CAR_BIT;" in app_js
+    assert "if (!runSummary.cancelled) {" in app_js
+    assert "runPostMvpTransitStub(mapData.graph, searchState);" in app_js
     assert "runSearchTimeSlicedWithRendering(" in app_js
 
 
@@ -304,6 +306,8 @@ def test_app_js_has_canvas_pixel_to_graph_coordinate_contract() -> None:
 def test_app_js_has_nearest_node_and_highlight_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
+    assert "export function findNearestNodeIndexForMode(" in app_js
+    assert "allowedModeMask = EDGE_MODE_CAR_BIT" in app_js
     assert "export function findNearestNodeForCanvasPixel(" in app_js
     assert (
         "const { easting, northing } = mapCanvasPixelToGraphMeters(mapData.graph, xPx, yPx);"
@@ -311,7 +315,9 @@ def test_app_js_has_nearest_node_and_highlight_contract() -> None:
     )
     assert "const xM = easting - mapData.graph.header.originEasting;" in app_js
     assert "const yM = northing - mapData.graph.header.originNorthing;" in app_js
-    assert "const nodeIndex = findNearestNodeIndex(mapData.graph, xM, yM);" in app_js
+    assert (
+        "const nodeIndex = findNearestNodeIndexForMode(mapData.graph, xM, yM, allowedModeMask);"
+    ) in app_js
     assert "export function highlightNodeIndexOnIsochroneCanvas(" in app_js
     assert "const xPx = mapData.nodePixels.nodePixelX[nodeIndex];" in app_js
     assert "const yPx = mapData.nodePixels.nodePixelY[nodeIndex];" in app_js
@@ -329,7 +335,7 @@ def test_app_js_has_click_to_routing_wiring_contract() -> None:
     assert "const runToken = { cancelled: false };" in app_js
     assert "clearGrid(mapData.pixelGrid);" in app_js
     assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
-    assert "findNearestNodeForCanvasPixel(mapData, xPx, yPx);" in app_js
+    assert "findNearestNodeForCanvasPixel(mapData, xPx, yPx, { allowedModeMask });" in app_js
     assert "highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);" in app_js
     assert "runWalkingIsochroneFromSourceNode(" in app_js
     assert "Number.POSITIVE_INFINITY" in app_js

@@ -416,6 +416,74 @@ export function findNearestNodeIndex(graph, xM, yM) {
   return nearestNodeIndex;
 }
 
+function nodeHasAllowedModeOutgoingEdge(graph, nodeIndex, allowedModeMask) {
+  const firstEdgeIndex = graph.nodeU32[nodeIndex * 4 + 2];
+  const edgeCount = graph.nodeU16[nodeIndex * 8 + 6];
+  const endEdgeIndex = firstEdgeIndex + edgeCount;
+
+  for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
+    if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
+      continue;
+    }
+    const edgeCostSeconds = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
+    if (Number.isFinite(edgeCostSeconds) && edgeCostSeconds > 0) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function findNearestNodeIndexForMode(
+  graph,
+  xM,
+  yM,
+  allowedModeMask = EDGE_MODE_CAR_BIT,
+) {
+  validateGraphForRouting(graph);
+
+  if (!Number.isFinite(xM) || !Number.isFinite(yM)) {
+    throw new Error('xM and yM must be finite numbers');
+  }
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+
+  let nearestAnyNodeIndex = -1;
+  let nearestAnyDistanceSquared = Infinity;
+  let nearestModeNodeIndex = -1;
+  let nearestModeDistanceSquared = Infinity;
+
+  for (let nodeIndex = 0; nodeIndex < graph.header.nNodes; nodeIndex += 1) {
+    const nodeXM = graph.nodeI32[nodeIndex * 4];
+    const nodeYM = graph.nodeI32[nodeIndex * 4 + 1];
+    const dx = nodeXM - xM;
+    const dy = nodeYM - yM;
+    const distanceSquared = dx * dx + dy * dy;
+
+    if (distanceSquared < nearestAnyDistanceSquared) {
+      nearestAnyDistanceSquared = distanceSquared;
+      nearestAnyNodeIndex = nodeIndex;
+    }
+
+    if (!nodeHasAllowedModeOutgoingEdge(graph, nodeIndex, allowedModeMask)) {
+      continue;
+    }
+    if (distanceSquared < nearestModeDistanceSquared) {
+      nearestModeDistanceSquared = distanceSquared;
+      nearestModeNodeIndex = nodeIndex;
+    }
+  }
+
+  if (nearestModeNodeIndex >= 0) {
+    return nearestModeNodeIndex;
+  }
+  if (nearestAnyNodeIndex >= 0) {
+    return nearestAnyNodeIndex;
+  }
+  throw new Error('graph contains no nodes');
+}
+
 export function mapCanvasPixelToGraphMeters(graph, xPx, yPx) {
   validateGraphForRouting(graph);
 
@@ -457,7 +525,7 @@ export function mapClientPointToCanvasPixel(canvas, clientX, clientY) {
   return { xPx, yPx };
 }
 
-export function findNearestNodeForCanvasPixel(mapData, xPx, yPx) {
+export function findNearestNodeForCanvasPixel(mapData, xPx, yPx, options = {}) {
   if (!mapData || typeof mapData !== 'object' || !mapData.graph) {
     throw new Error('mapData.graph is required');
   }
@@ -465,7 +533,8 @@ export function findNearestNodeForCanvasPixel(mapData, xPx, yPx) {
   const { easting, northing } = mapCanvasPixelToGraphMeters(mapData.graph, xPx, yPx);
   const xM = easting - mapData.graph.header.originEasting;
   const yM = northing - mapData.graph.header.originNorthing;
-  const nodeIndex = findNearestNodeIndex(mapData.graph, xM, yM);
+  const allowedModeMask = options.allowedModeMask ?? EDGE_MODE_CAR_BIT;
+  const nodeIndex = findNearestNodeIndexForMode(mapData.graph, xM, yM, allowedModeMask);
 
   return {
     nodeIndex,
@@ -520,7 +589,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
   let activeRunToken = null;
   let isDisposed = false;
 
-  const runFromNodeIndex = async (nodeIndex) => {
+  const runFromNodeIndex = async (nodeIndex, modeMask = null) => {
     if (isDisposed) {
       throw new Error('routing click handler is disposed');
     }
@@ -538,7 +607,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     clearGrid(mapData.pixelGrid);
     blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
     highlightNodeIndexOnIsochroneCanvas(shell, mapData, nodeIndex);
-    const allowedModeMask = getAllowedModeMaskFromShell(shell);
+    const allowedModeMask = modeMask ?? getAllowedModeMaskFromShell(shell);
 
     try {
       const runSummary = await runWalkingIsochroneFromSourceNode(
@@ -570,8 +639,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
   };
 
   const runFromCanvasPixel = async (xPx, yPx) => {
-    const nearest = findNearestNodeForCanvasPixel(mapData, xPx, yPx);
-    const runSummary = await runFromNodeIndex(nearest.nodeIndex);
+    const allowedModeMask = getAllowedModeMaskFromShell(shell);
+    const nearest = findNearestNodeForCanvasPixel(mapData, xPx, yPx, { allowedModeMask });
+    const runSummary = await runFromNodeIndex(nearest.nodeIndex, allowedModeMask);
 
     return {
       ...nearest,
@@ -629,7 +699,9 @@ export async function runWalkingIsochroneFromSourceNode(
     allowedModeMask,
   );
   const runSummary = await runSearchTimeSlicedWithRendering(shell, mapData, searchState, options);
-  runPostMvpTransitStub(mapData.graph, searchState);
+  if (!runSummary.cancelled) {
+    runPostMvpTransitStub(mapData.graph, searchState);
+  }
   return runSummary;
 }
 
@@ -1609,7 +1681,11 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   });
 
   if (!runSummary.cancelled) {
-    setRoutingStatus(shell, formatRoutingStatusDone());
+    if (paintedNodeCount <= 1) {
+      setRoutingStatus(shell, 'Done - no reachable network for selected mode at this start point.');
+    } else {
+      setRoutingStatus(shell, formatRoutingStatusDone());
+    }
   }
 
   return {
