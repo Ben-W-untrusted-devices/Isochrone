@@ -334,3 +334,91 @@ def test_directional_maxspeed_tags_apply_to_forward_and_backward_edges() -> None
     )
     assert forward.maxspeed_kph == 30
     assert backward.maxspeed_kph == 20
+
+
+def test_fallback_maxspeed_uses_highway_and_mode_defaults() -> None:
+    extracted = WalkableGraphExtract(
+        ways=(
+            WayCandidate(
+                osm_id=720,
+                highway="residential",
+                node_ids=(1, 2),
+                constraints={},
+            ),
+            WayCandidate(
+                osm_id=721,
+                highway="cycleway",
+                node_ids=(2, 3),
+                constraints={},
+            ),
+            WayCandidate(
+                osm_id=722,
+                highway="footway",
+                node_ids=(3, 4),
+                constraints={},
+            ),
+        ),
+        node_coords={
+            1: (52.5, 13.4),
+            2: (52.5001, 13.401),
+            3: (52.5002, 13.402),
+            4: (52.5003, 13.403),
+        },
+        connector_nodes={},
+        dropped_way_count=0,
+    )
+    projected = _projection({1: (0, 0), 2: (10, 0), 3: (20, 0), 4: (30, 0)})
+
+    graph = build_adjacency_graph(extracted, projected)
+
+    maxspeed_by_road_class: dict[int, set[int]] = {}
+    for edge in graph.edges:
+        bucket = maxspeed_by_road_class.setdefault(edge.road_class_id, set())
+        bucket.add(edge.maxspeed_kph)
+
+    assert maxspeed_by_road_class[6] == {30}
+    assert maxspeed_by_road_class[8] == {20}
+    assert maxspeed_by_road_class[1] == {5}
+
+
+def test_mode_access_conflict_resolution_order_is_deterministic() -> None:
+    extracted = WalkableGraphExtract(
+        ways=(
+            WayCandidate(
+                osm_id=730,
+                highway="residential",
+                node_ids=(1, 2),
+                constraints={
+                    "access": "no",
+                    "foot": "yes",
+                },
+            ),
+            WayCandidate(
+                osm_id=731,
+                highway="residential",
+                node_ids=(2, 3),
+                constraints={
+                    "access": "no",
+                    "foot": "yes",
+                    "bicycle": "yes",
+                    "vehicle": "yes",
+                    "motor_vehicle": "no",
+                },
+            ),
+        ),
+        node_coords={1: (52.5, 13.4), 2: (52.5001, 13.401), 3: (52.5002, 13.402)},
+        connector_nodes={},
+        dropped_way_count=0,
+    )
+    projected = _projection({1: (0, 0), 2: (10, 0), 3: (20, 0)})
+
+    graph = build_adjacency_graph(extracted, projected)
+
+    edge_modes = {(edge.source_index, edge.target_index): edge.mode_mask for edge in graph.edges}
+    # Way 730: access=no clears all, foot=yes re-allows walk only.
+    assert edge_modes[(0, 1)] == MODE_MASK_WALK
+    assert edge_modes[(1, 0)] == MODE_MASK_WALK
+    # Way 731: access=no clears all; foot+bicycle+vehicle re-allow;
+    # then motor_vehicle=no removes car.
+    assert edge_modes[(1, 2)] == (MODE_MASK_WALK | MODE_MASK_BIKE)
+    assert edge_modes[(2, 1)] == (MODE_MASK_WALK | MODE_MASK_BIKE)

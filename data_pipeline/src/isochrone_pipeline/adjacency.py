@@ -58,6 +58,39 @@ CAR_DEFAULT_HIGHWAYS = {
     "motorway",
 }
 
+WALK_FALLBACK_SPEED_KPH_BY_HIGHWAY = {
+    "steps": 3,
+    "footway": 5,
+    "path": 5,
+    "pedestrian": 5,
+}
+BIKE_FALLBACK_SPEED_KPH_BY_HIGHWAY = {
+    "cycleway": 20,
+    "path": 15,
+    "track": 15,
+    "footway": 12,
+    "pedestrian": 10,
+    "living_street": 15,
+    "residential": 18,
+    "service": 16,
+    "unclassified": 20,
+    "tertiary": 22,
+    "secondary": 22,
+    "primary": 22,
+}
+CAR_FALLBACK_SPEED_KPH_BY_HIGHWAY = {
+    "living_street": 10,
+    "service": 20,
+    "residential": 30,
+    "unclassified": 35,
+    "tertiary": 40,
+    "secondary": 50,
+    "primary": 50,
+    "trunk": 80,
+    "motorway": 110,
+    "track": 20,
+}
+
 ROAD_CLASS_BY_HIGHWAY: dict[str, int] = {
     "footway": 1,
     "path": 2,
@@ -310,12 +343,14 @@ def build_adjacency_graph(
 
 
 def _is_way_disallowed(way: WayCandidate) -> bool:
-    access = _normalized_constraint(way, "access")
     foot = _normalized_constraint(way, "foot")
+    access = _normalized_constraint(way, "access")
 
-    if access in DENY_VALUES:
-        return True
     if foot in DENY_VALUES:
+        return True
+    if foot in ALLOW_VALUES:
+        return False
+    if access in DENY_VALUES:
         return True
 
     return False
@@ -399,9 +434,12 @@ def _maxspeed_kph_for_way_direction(way: WayCandidate, *, is_forward: bool) -> i
     base_speed = _parse_maxspeed_kph(_normalized_constraint(way, "maxspeed"))
     directional_key = "maxspeed:forward" if is_forward else "maxspeed:backward"
     directional_value = _normalized_constraint(way, directional_key)
-    if directional_value is None:
-        return base_speed
-    return _parse_maxspeed_kph(directional_value)
+    selected_speed = (
+        base_speed if directional_value is None else _parse_maxspeed_kph(directional_value)
+    )
+    if selected_speed > 0:
+        return selected_speed
+    return _fallback_maxspeed_kph_for_way(way)
 
 
 def _road_class_id_for_way(highway: str) -> int:
@@ -456,3 +494,23 @@ def _parse_maxspeed_token_kph(token: str) -> int | None:
 
     rounded = int(round(value))
     return max(0, min(rounded, 65535))
+
+
+def _fallback_maxspeed_kph_for_way(way: WayCandidate) -> int:
+    mode_mask = _mode_mask_for_way(way)
+    candidates: list[int] = []
+
+    if mode_mask & MODE_MASK_WALK:
+        candidates.append(WALK_FALLBACK_SPEED_KPH_BY_HIGHWAY.get(way.highway, 5))
+    if mode_mask & MODE_MASK_BIKE:
+        bike_fallback = BIKE_FALLBACK_SPEED_KPH_BY_HIGHWAY.get(way.highway)
+        if bike_fallback is not None:
+            candidates.append(bike_fallback)
+    if mode_mask & MODE_MASK_CAR:
+        car_fallback = CAR_FALLBACK_SPEED_KPH_BY_HIGHWAY.get(way.highway)
+        if car_fallback is not None:
+            candidates.append(car_fallback)
+
+    if not candidates:
+        return 0
+    return max(candidates)

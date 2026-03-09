@@ -25,12 +25,24 @@ The record size is unchanged from v1; metadata is packed into the final `uint32`
 - bits `16..31`: `maxspeed_kph`
 
 ## Current extraction defaults (v2 foundation)
-- `mode_mask`: currently `walk` bit only.
+- `mode_mask`: derived from highway defaults plus access-tag conflict resolution.
 - `maxspeed_kph`: parsed from `maxspeed`, with directional override:
   - forward edge prefers `maxspeed:forward` when present
   - backward edge prefers `maxspeed:backward` when present
-  - otherwise falls back to `maxspeed` or `0`
+  - otherwise falls back to `maxspeed` or deterministic highway/mode defaults
 - `road_class_id`: deterministic ID derived from `highway=*`.
+
+## Access conflict resolution order
+Mode permissions are derived deterministically from combined tags:
+1. Start from highway defaults (`walk` always, plus class-based bike/car defaults).
+2. Apply `access=*` global allow/deny.
+3. Apply mode overrides in fixed order: `foot`, `bicycle`, `vehicle`, `motor_vehicle`.
+4. Final mode bits are stored in `mode_mask`.
+
+## Fallback speed policy
+When explicit speed tags are absent/unusable:
+- Use highway + mode fallback tables (`walk`, `bike`, `car`).
+- Choose the maximum allowed-mode fallback as stored `maxspeed_kph` for that directed edge.
 
 ## Cost strategy decision
 - Chosen strategy: runtime bike/car costing from edge geometry + metadata.

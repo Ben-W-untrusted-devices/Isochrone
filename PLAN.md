@@ -661,8 +661,8 @@ Estimated time: 1 hour 15 min
 Tasks
 - [x] Implement robust `maxspeed` parser (numeric + unit variants, e.g. `50`, `30 mph`, `walk`)
 - [x] Add directional speed selection (`maxspeed:forward`/`backward`) on directed edges
-- [ ] Define deterministic fallback speed table by highway class + mode when explicit speed tags are absent
-- [ ] Define deterministic mode-access rules (allow/deny) from combined tags, including conflict resolution order
+- [x] Define deterministic fallback speed table by highway class + mode when explicit speed tags are absent
+- [x] Define deterministic mode-access rules (allow/deny) from combined tags, including conflict resolution order
 
 ### 10.4.4 Export and validation updates
 Estimated time: 50 min
