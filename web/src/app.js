@@ -627,12 +627,7 @@ export function initializeAppShell(doc) {
   const loadingText = resolvedDocument.getElementById('loading-text');
   const loadingProgressBar = resolvedDocument.getElementById('loading-progress-bar');
   const routingStatus = resolvedDocument.getElementById('routing-status');
-  const modeMenuContainer = resolvedDocument.getElementById('mode-menu');
-  const modeMenuButton = resolvedDocument.getElementById('mode-menu-button');
-  const modeMenuPopup = resolvedDocument.getElementById('mode-menu-popup');
-  const modeWalkCheckbox = resolvedDocument.getElementById('mode-walk');
-  const modeBikeCheckbox = resolvedDocument.getElementById('mode-bike');
-  const modeCarCheckbox = resolvedDocument.getElementById('mode-car');
+  const modeSelect = resolvedDocument.getElementById('mode-select');
 
   if (!mapRegion || mapRegion.tagName !== 'SECTION') {
     throw new Error('index.html is missing <section id="map-region">');
@@ -658,23 +653,8 @@ export function initializeAppShell(doc) {
   if (!routingStatus || routingStatus.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="routing-status">');
   }
-  if (!modeMenuContainer || modeMenuContainer.tagName !== 'DIV') {
-    throw new Error('index.html is missing <div id="mode-menu">');
-  }
-  if (!modeMenuButton || modeMenuButton.tagName !== 'BUTTON') {
-    throw new Error('index.html is missing <button id="mode-menu-button">');
-  }
-  if (!modeMenuPopup || modeMenuPopup.tagName !== 'DIV') {
-    throw new Error('index.html is missing <div id="mode-menu-popup">');
-  }
-  if (!modeWalkCheckbox || modeWalkCheckbox.tagName !== 'INPUT') {
-    throw new Error('index.html is missing <input id="mode-walk">');
-  }
-  if (!modeBikeCheckbox || modeBikeCheckbox.tagName !== 'INPUT') {
-    throw new Error('index.html is missing <input id="mode-bike">');
-  }
-  if (!modeCarCheckbox || modeCarCheckbox.tagName !== 'INPUT') {
-    throw new Error('index.html is missing <input id="mode-car">');
+  if (!modeSelect || modeSelect.tagName !== 'SELECT') {
+    throw new Error('index.html is missing <select id="mode-select">');
   }
 
   sizeCanvasToCssPixels(isochroneCanvas);
@@ -687,11 +667,7 @@ export function initializeAppShell(doc) {
   loadingText.textContent = 'Loading district boundaries...';
   setLoadingProgressBar(loadingProgressBar, 0);
   routingStatus.textContent = 'Ready.';
-  modeMenuButton.setAttribute('aria-expanded', 'false');
-  if ('matches' in modeMenuPopup && modeMenuPopup.matches(':popover-open')) {
-    modeMenuPopup.hidePopover();
-  }
-  modeCarCheckbox.checked = true;
+  modeSelect.value = 'car';
 
   return {
     mapRegion,
@@ -703,12 +679,7 @@ export function initializeAppShell(doc) {
     loadingText,
     loadingProgressBar,
     routingStatus,
-    modeMenuContainer,
-    modeMenuButton,
-    modeMenuPopup,
-    modeWalkCheckbox,
-    modeBikeCheckbox,
-    modeCarCheckbox,
+    modeSelect,
     loadingFadeTimeoutId: null,
   };
 }
@@ -718,104 +689,42 @@ export function getAllowedModeMaskFromShell(shell) {
     throw new Error('shell is required');
   }
 
-  const modeWalk = shell.modeWalkCheckbox?.checked;
-  const modeBike = shell.modeBikeCheckbox?.checked;
-  const modeCar = shell.modeCarCheckbox?.checked;
-
-  let allowedModeMask = 0;
-  if (modeWalk) {
-    allowedModeMask |= EDGE_MODE_WALK_BIT;
+  const selectedMode = shell.modeSelect?.value;
+  if (selectedMode === 'walk') {
+    return EDGE_MODE_WALK_BIT;
   }
-  if (modeBike) {
-    allowedModeMask |= EDGE_MODE_BIKE_BIT;
+  if (selectedMode === 'bike') {
+    return EDGE_MODE_BIKE_BIT;
   }
-  if (modeCar) {
-    allowedModeMask |= EDGE_MODE_CAR_BIT;
+  if (selectedMode === 'car') {
+    return EDGE_MODE_CAR_BIT;
   }
 
-  if (allowedModeMask === 0) {
-    if (shell.modeCarCheckbox) {
-      shell.modeCarCheckbox.checked = true;
-    }
-    allowedModeMask = EDGE_MODE_CAR_BIT;
+  if (shell.modeSelect) {
+    shell.modeSelect.value = 'car';
   }
-
-  return allowedModeMask;
+  return EDGE_MODE_CAR_BIT;
 }
 
-export function bindModeMenuPopup(shell) {
+export function bindModeSelectControl(shell) {
   if (!shell || typeof shell !== 'object') {
     throw new Error('shell is required');
   }
-  if (!shell.modeMenuContainer || !shell.modeMenuButton || !shell.modeMenuPopup) {
-    throw new Error('mode menu shell elements are required');
-  }
-  if (!shell.modeWalkCheckbox || !shell.modeBikeCheckbox || !shell.modeCarCheckbox) {
-    throw new Error('mode checkbox elements are required');
-  }
-  if (!('showPopover' in shell.modeMenuPopup) || !('hidePopover' in shell.modeMenuPopup)) {
-    throw new Error('mode menu popup requires HTML popover support');
+  if (!shell.modeSelect) {
+    throw new Error('mode select element is required');
   }
 
-  const positionPopup = () => {
-    const buttonRect = shell.modeMenuButton.getBoundingClientRect();
-    const popupRect = shell.modeMenuPopup.getBoundingClientRect();
-    const viewportPaddingPx = 8;
-    const popupGapPx = 6;
-
-    let leftPx = buttonRect.right - popupRect.width;
-    leftPx = Math.max(
-      viewportPaddingPx,
-      Math.min(leftPx, globalThis.innerWidth - popupRect.width - viewportPaddingPx),
-    );
-
-    let topPx = buttonRect.bottom + popupGapPx;
-    if (topPx + popupRect.height > globalThis.innerHeight - viewportPaddingPx) {
-      topPx = Math.max(viewportPaddingPx, buttonRect.top - popupRect.height - popupGapPx);
-    }
-
-    shell.modeMenuPopup.style.left = `${Math.round(leftPx)}px`;
-    shell.modeMenuPopup.style.top = `${Math.round(topPx)}px`;
-  };
-
-  const handlePopupToggle = (event) => {
-    const isOpen = event.newState === 'open';
-    shell.modeMenuButton.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-    if (isOpen) {
-      positionPopup();
-    }
-  };
-
-  const handleCheckboxChange = () => {
+  const handleSelectChange = () => {
     getAllowedModeMaskFromShell(shell);
   };
 
-  const handleWindowResize = () => {
-    if (shell.modeMenuPopup.matches(':popover-open')) {
-      positionPopup();
-    }
-  };
-
-  shell.modeMenuButton.setAttribute('aria-expanded', 'false');
+  shell.modeSelect.value = 'car';
   getAllowedModeMaskFromShell(shell);
-
-  shell.modeMenuPopup.addEventListener('toggle', handlePopupToggle);
-  shell.modeWalkCheckbox.addEventListener('change', handleCheckboxChange);
-  shell.modeBikeCheckbox.addEventListener('change', handleCheckboxChange);
-  shell.modeCarCheckbox.addEventListener('change', handleCheckboxChange);
-  globalThis.addEventListener('resize', handleWindowResize);
+  shell.modeSelect.addEventListener('change', handleSelectChange);
 
   return {
     dispose() {
-      shell.modeMenuPopup.removeEventListener('toggle', handlePopupToggle);
-      shell.modeWalkCheckbox.removeEventListener('change', handleCheckboxChange);
-      shell.modeBikeCheckbox.removeEventListener('change', handleCheckboxChange);
-      shell.modeCarCheckbox.removeEventListener('change', handleCheckboxChange);
-      globalThis.removeEventListener('resize', handleWindowResize);
-      if (shell.modeMenuPopup.matches(':popover-open')) {
-        shell.modeMenuPopup.hidePopover();
-      }
-      shell.modeMenuButton.setAttribute('aria-expanded', 'false');
+      shell.modeSelect.removeEventListener('change', handleSelectChange);
     },
   };
 }
@@ -1990,7 +1899,7 @@ function isClosedPath(path) {
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', () => {
     const shell = initializeAppShell(globalThis.document);
-    bindModeMenuPopup(shell);
+    bindModeSelectControl(shell);
     void initializeMapData(shell)
       .then((mapData) => {
         window.addEventListener('resize', () => {

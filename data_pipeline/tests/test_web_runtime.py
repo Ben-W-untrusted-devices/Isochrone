@@ -17,15 +17,10 @@ def test_index_html_uses_native_module_entrypoint() -> None:
     assert 'id="routing-status"' in index_html
     assert 'id="map-region"' in index_html
     assert 'id="canvas-stack"' in index_html
-    assert 'id="mode-menu-button"' in index_html
-    assert 'id="mode-menu-popup"' in index_html
-    assert 'id="mode-walk"' in index_html
-    assert 'id="mode-bike"' in index_html
-    assert 'id="mode-car"' in index_html
-    assert 'id="mode-car" name="mode-car" type="checkbox" checked' in index_html
-    assert 'popovertarget="mode-menu-popup"' in index_html
-    assert 'popovertargetaction="toggle"' in index_html
-    assert 'id="mode-menu-popup" role="menu" popover' in index_html
+    assert 'id="mode-select"' in index_html
+    assert '<option value="walk">Walk</option>' in index_html
+    assert '<option value="bike">Bike</option>' in index_html
+    assert '<option value="car" selected>Car</option>' in index_html
     assert "dist/app.js" not in index_html
     assert re.search(
         r'<link[^>]*rel="stylesheet"[^>]*href="\./src/styles\.css"',
@@ -225,34 +220,17 @@ def test_app_js_has_walking_dijkstra_contract() -> None:
     assert "runSearchTimeSlicedWithRendering(" in app_js
 
 
-def test_app_js_has_mode_selector_popup_contract() -> None:
+def test_app_js_has_mode_selector_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
-    assert "getElementById('mode-menu-button')" in app_js
-    assert "getElementById('mode-menu-popup')" in app_js
-    assert "getElementById('mode-walk')" in app_js
-    assert "getElementById('mode-bike')" in app_js
-    assert "getElementById('mode-car')" in app_js
+    assert "getElementById('mode-select')" in app_js
+    assert "export function bindModeSelectControl(" in app_js
     assert "export function getAllowedModeMaskFromShell(" in app_js
-    assert "const modeWalk = shell.modeWalkCheckbox?.checked;" in app_js
-    assert "const modeBike = shell.modeBikeCheckbox?.checked;" in app_js
-    assert "const modeCar = shell.modeCarCheckbox?.checked;" in app_js
-    assert "if (modeCar) {" in app_js
-    assert "if (allowedModeMask === 0) {" in app_js
-    assert "shell.modeCarCheckbox.checked = true;" in app_js
-    assert "export function bindModeMenuPopup(" in app_js
-    assert (
-        "if (!('showPopover' in shell.modeMenuPopup) || !('hidePopover' in shell.modeMenuPopup)) {"
-    ) in app_js
-    assert "const handlePopupToggle = (event) => {" in app_js
-    assert "const isOpen = event.newState === 'open';" in app_js
-    assert (
-        "shell.modeMenuButton.setAttribute('aria-expanded', isOpen ? 'true' : 'false');"
-    ) in app_js
-    assert "shell.modeMenuPopup.addEventListener('toggle', handlePopupToggle);" in app_js
-    assert "shell.modeWalkCheckbox.addEventListener('change', handleCheckboxChange);" in app_js
-    assert "shell.modeBikeCheckbox.addEventListener('change', handleCheckboxChange);" in app_js
-    assert "shell.modeCarCheckbox.addEventListener('change', handleCheckboxChange);" in app_js
+    assert "const selectedMode = shell.modeSelect?.value;" in app_js
+    assert "if (selectedMode === 'walk')" in app_js
+    assert "if (selectedMode === 'bike')" in app_js
+    assert "if (selectedMode === 'car')" in app_js
+    assert "shell.modeSelect.value = 'car';" in app_js
 
 
 def test_app_js_reads_v2_edge_mode_and_speed_metadata_contract() -> None:
@@ -369,6 +347,5 @@ def test_styles_prevent_zero_height_map_region() -> None:
     assert "#loading.is-fading" in styles_css
     assert "#loading[hidden]" in styles_css
     assert "#routing-status" in styles_css
-    assert ".mode-menu" in styles_css
-    assert "#mode-menu-popup" in styles_css
-    assert "#mode-menu-popup:popover-open" in styles_css
+    assert ".mode-select" in styles_css
+    assert "#mode-select" in styles_css

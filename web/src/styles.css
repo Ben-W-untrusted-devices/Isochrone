@@ -46,11 +46,11 @@ body {
   min-width: 7.5rem;
 }
 
-.mode-menu {
-  position: relative;
+.mode-select {
+  font-size: 0.9rem;
 }
 
-#mode-menu-button {
+#mode-select {
   appearance: none;
   border: 1px solid #9eb0bf;
   background: #f7fbff;
@@ -59,38 +59,11 @@ body {
   padding: 0.35rem 0.6rem;
   font-size: 0.85rem;
   cursor: pointer;
+  min-width: 8.5rem;
 }
 
-#mode-menu-button:hover {
+#mode-select:hover {
   background: #edf6ff;
-}
-
-#mode-menu-popup {
-  position: fixed;
-  inset: auto;
-  margin: 0;
-  min-width: 8rem;
-  padding: 0.45rem 0.55rem;
-  border: 1px solid #9eb0bf;
-  border-radius: 0.35rem;
-  background: #ffffff;
-  box-shadow: 0 8px 20px rgba(20, 40, 55, 0.2);
-  z-index: 10;
-  display: none;
-}
-
-#mode-menu-popup:popover-open {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-#mode-menu-popup label {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  font-size: 0.84rem;
-  color: #1e3748;
 }
 
 .map-region {
