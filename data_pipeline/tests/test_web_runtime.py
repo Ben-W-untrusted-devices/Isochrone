@@ -205,7 +205,7 @@ def test_app_js_has_walking_dijkstra_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
     assert "export function createWalkingSearchState(" in app_js
-    assert "const distSeconds = new Float32Array(graph.header.nNodes);" in app_js
+    assert "const distSeconds = new Float64Array(graph.header.nNodes);" in app_js
     assert "distSeconds.fill(Infinity);" in app_js
     assert "const settled = new Uint8Array(graph.header.nNodes);" in app_js
     assert "heap.push(sourceNodeIndex, 0);" in app_js

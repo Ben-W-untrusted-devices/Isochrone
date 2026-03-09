@@ -248,7 +248,7 @@ export function createWalkingSearchState(
     throw new Error('allowedModeMask must be a positive 8-bit integer');
   }
 
-  const distSeconds = new Float32Array(graph.header.nNodes);
+  const distSeconds = new Float64Array(graph.header.nNodes);
   distSeconds.fill(Infinity);
   const settled = new Uint8Array(graph.header.nNodes);
   const heap = new MinHeap(graph.header.nNodes);
@@ -320,13 +320,16 @@ export function createWalkingSearchState(
             continue;
           }
           if (nextCost < distSeconds[targetIndex]) {
-            distSeconds[targetIndex] = nextCost;
-
             const heapPosition = heap.positionLookup[targetIndex];
             if (heapPosition === -1) {
+              distSeconds[targetIndex] = nextCost;
               heap.push(targetIndex, nextCost);
-            } else {
+            } else if (nextCost < heap.costs[heapPosition]) {
+              distSeconds[targetIndex] = nextCost;
               heap.decreaseKey(targetIndex, nextCost);
+            } else {
+              // Keep distance cache consistent with queued best cost under rounding edge cases.
+              distSeconds[targetIndex] = heap.costs[heapPosition];
             }
           }
         }
