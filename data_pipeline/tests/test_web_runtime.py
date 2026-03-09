@@ -149,6 +149,27 @@ def test_app_js_has_reachable_paint_and_blit_contract() -> None:
     assert "context.putImageData(imageData, 0, 0);" in app_js
 
 
+def test_app_js_has_webgl_blit_renderer_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "export function createWebGlIsochroneRenderer(" in app_js
+    assert "const contextWebGl2 = canvas.getContext('webgl2'" in app_js
+    assert "const contextWebGl = canvas.getContext('webgl'" in app_js
+    assert "if (!gl) {" in app_js
+    assert "return null;" in app_js
+    assert "gl.texImage2D(" in app_js
+    assert "pixelGrid.rgba" in app_js
+    assert "gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);" in app_js
+    assert "function createCanvas2dIsochroneRenderer(" in app_js
+    assert "export function createIsochroneRenderer(" in app_js
+    assert "const webglRenderer = createWebGlIsochroneRenderer(canvas, options);" in app_js
+    assert "return webglRenderer ?? createCanvas2dIsochroneRenderer(canvas);" in app_js
+    assert "function getOrCreateIsochroneRenderer(canvas)" in app_js
+    assert "canvas.__isochroneRenderer = renderer;" in app_js
+    assert "const renderer = getOrCreateIsochroneRenderer(canvas);" in app_js
+    assert "renderer.draw(pixelGrid);" in app_js
+
+
 def test_app_js_has_cpu_interpolation_foundation_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 

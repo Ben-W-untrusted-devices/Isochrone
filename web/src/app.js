@@ -1812,28 +1812,221 @@ export function paintReachableNodesToGrid(pixelGrid, nodePixels, distSeconds, op
   return paintedCount;
 }
 
-export function blitPixelGridToCanvas(canvas, pixelGrid) {
-  if (!canvas || typeof canvas.getContext !== 'function') {
-    throw new Error('canvas must provide getContext("2d")');
-  }
-  validatePixelGrid(pixelGrid);
-
-  if (canvas.width !== pixelGrid.widthPx) {
-    canvas.width = pixelGrid.widthPx;
-  }
-  if (canvas.height !== pixelGrid.heightPx) {
-    canvas.height = pixelGrid.heightPx;
-  }
-
+function createCanvas2dIsochroneRenderer(canvas) {
   const context = canvas.getContext('2d');
   if (!context) {
     throw new Error('Unable to get 2D context for isochrone canvas');
   }
 
-  const imageData = new ImageData(pixelGrid.rgba, pixelGrid.widthPx, pixelGrid.heightPx);
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  context.putImageData(imageData, 0, 0);
-  return imageData;
+  return {
+    mode: '2d',
+    draw(pixelGrid) {
+      if (canvas.width !== pixelGrid.widthPx) {
+        canvas.width = pixelGrid.widthPx;
+      }
+      if (canvas.height !== pixelGrid.heightPx) {
+        canvas.height = pixelGrid.heightPx;
+      }
+
+      const imageData = new ImageData(pixelGrid.rgba, pixelGrid.widthPx, pixelGrid.heightPx);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.putImageData(imageData, 0, 0);
+      return imageData;
+    },
+  };
+}
+
+function createWebGlShader(gl, type, source) {
+  const shader = gl.createShader(type);
+  if (!shader) {
+    throw new Error('failed to allocate WebGL shader');
+  }
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    const infoLog = gl.getShaderInfoLog(shader) ?? 'unknown shader compile error';
+    gl.deleteShader(shader);
+    throw new Error(`WebGL shader compile failed: ${infoLog}`);
+  }
+  return shader;
+}
+
+function createWebGlProgram(gl, vertexShaderSource, fragmentShaderSource) {
+  const vertexShader = createWebGlShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+  const fragmentShader = createWebGlShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+  const program = gl.createProgram();
+  if (!program) {
+    gl.deleteShader(vertexShader);
+    gl.deleteShader(fragmentShader);
+    throw new Error('failed to allocate WebGL program');
+  }
+
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  gl.deleteShader(vertexShader);
+  gl.deleteShader(fragmentShader);
+
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    const infoLog = gl.getProgramInfoLog(program) ?? 'unknown program link error';
+    gl.deleteProgram(program);
+    throw new Error(`WebGL program link failed: ${infoLog}`);
+  }
+
+  return program;
+}
+
+export function createWebGlIsochroneRenderer(canvas, options = {}) {
+  if (!canvas || typeof canvas.getContext !== 'function') {
+    throw new Error('canvas must provide getContext("webgl")');
+  }
+
+  const contextAttributes = {
+    alpha: true,
+    antialias: false,
+    depth: false,
+    stencil: false,
+    premultipliedAlpha: false,
+    preserveDrawingBuffer: false,
+    ...options.contextAttributes,
+  };
+  const contextWebGl2 = canvas.getContext('webgl2', contextAttributes);
+  const contextWebGl = canvas.getContext('webgl', contextAttributes);
+  const gl = contextWebGl ?? contextWebGl2;
+  if (!gl) {
+    return null;
+  }
+
+  const isWebGl2 =
+    typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext;
+  const vertexShaderSource = isWebGl2
+    ? `#version 300 es
+in vec2 a_position;
+out vec2 v_uv;
+void main(void) {
+  v_uv = (a_position + 1.0) * 0.5;
+  gl_Position = vec4(a_position, 0.0, 1.0);
+}`
+    : `attribute vec2 a_position;
+varying vec2 v_uv;
+void main(void) {
+  v_uv = (a_position + 1.0) * 0.5;
+  gl_Position = vec4(a_position, 0.0, 1.0);
+}`;
+  const fragmentShaderSource = isWebGl2
+    ? `#version 300 es
+precision mediump float;
+uniform sampler2D u_texture;
+in vec2 v_uv;
+out vec4 outColor;
+void main(void) {
+  outColor = texture(u_texture, vec2(v_uv.x, 1.0 - v_uv.y));
+}`
+    : `precision mediump float;
+uniform sampler2D u_texture;
+varying vec2 v_uv;
+void main(void) {
+  gl_FragColor = texture2D(u_texture, vec2(v_uv.x, 1.0 - v_uv.y));
+}`;
+
+  const program = createWebGlProgram(gl, vertexShaderSource, fragmentShaderSource);
+  const positionLocation = gl.getAttribLocation(program, 'a_position');
+  if (positionLocation < 0) {
+    gl.deleteProgram(program);
+    throw new Error('WebGL program is missing a_position attribute');
+  }
+
+  const quadBuffer = gl.createBuffer();
+  if (!quadBuffer) {
+    gl.deleteProgram(program);
+    throw new Error('failed to allocate WebGL quad buffer');
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+
+  const texture = gl.createTexture();
+  if (!texture) {
+    gl.deleteBuffer(quadBuffer);
+    gl.deleteProgram(program);
+    throw new Error('failed to allocate WebGL texture');
+  }
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+
+  gl.useProgram(program);
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+  gl.enableVertexAttribArray(positionLocation);
+  gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+  const textureLocation = gl.getUniformLocation(program, 'u_texture');
+  if (textureLocation) {
+    gl.uniform1i(textureLocation, 0);
+  }
+
+  return {
+    mode: 'webgl',
+    draw(pixelGrid) {
+      if (canvas.width !== pixelGrid.widthPx) {
+        canvas.width = pixelGrid.widthPx;
+      }
+      if (canvas.height !== pixelGrid.heightPx) {
+        canvas.height = pixelGrid.heightPx;
+      }
+
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.useProgram(program);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        pixelGrid.widthPx,
+        pixelGrid.heightPx,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        pixelGrid.rgba,
+      );
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      return null;
+    },
+  };
+}
+
+export function createIsochroneRenderer(canvas, options = {}) {
+  try {
+    const webglRenderer = createWebGlIsochroneRenderer(canvas, options);
+    return webglRenderer ?? createCanvas2dIsochroneRenderer(canvas);
+  } catch (error) {
+    console.warn('WebGL renderer initialization failed; falling back to 2D canvas renderer.', error);
+    return createCanvas2dIsochroneRenderer(canvas);
+  }
+}
+
+function getOrCreateIsochroneRenderer(canvas) {
+  const cached = canvas.__isochroneRenderer;
+  if (cached && typeof cached.draw === 'function') {
+    return cached;
+  }
+
+  const renderer = createIsochroneRenderer(canvas);
+  canvas.__isochroneRenderer = renderer;
+  return renderer;
+}
+
+export function blitPixelGridToCanvas(canvas, pixelGrid) {
+  if (!canvas || typeof canvas.getContext !== 'function') {
+    throw new Error('canvas must provide getContext("2d")');
+  }
+  validatePixelGrid(pixelGrid);
+  const renderer = getOrCreateIsochroneRenderer(canvas);
+  return renderer.draw(pixelGrid);
 }
 
 export function renderReachableNodes(shell, mapData, distSeconds, options = {}) {
