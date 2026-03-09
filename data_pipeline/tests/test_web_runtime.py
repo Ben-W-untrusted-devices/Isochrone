@@ -171,13 +171,27 @@ def test_app_js_paints_interpolated_edges_during_search_contract() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 
     assert "const EDGE_INTERPOLATION_SLACK_SECONDS = 0.75;" in app_js
+    assert "const INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE = 3;" in app_js
+    assert "const FINAL_EDGE_INTERPOLATION_STEP_STRIDE = 1;" in app_js
     assert "allowedModeMask," in app_js
     assert "export function paintSettledBatchEdgeInterpolationsToGrid(" in app_js
+    assert "export function paintAllReachableEdgeInterpolationsToGrid(" in app_js
     assert "const expectedTargetSeconds = startSeconds + edgeCostSeconds;" in app_js
     assert "if (expectedTargetSeconds > targetSeconds + edgeSlackSeconds)" in app_js
     assert "paintInterpolatedEdgeToGrid(" in app_js
+    assert "const stepStride = options.stepStride ?? 1;" in app_js
+    assert "if (stepIndex % stepStride !== 0 && stepIndex !== totalSteps)" in app_js
     assert "const allowedModeMask = searchState.allowedModeMask ?? EDGE_MODE_CAR_BIT;" in app_js
+    assert "const interactiveEdgeStepStride =" in app_js
+    assert (
+        "options.interactiveEdgeStepStride ?? INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE;" in app_js
+    )
+    assert (
+        "const finalEdgeStepStride = "
+        "options.finalEdgeStepStride ?? FINAL_EDGE_INTERPOLATION_STEP_STRIDE;"
+    ) in app_js
     assert "paintedEdgeCount += paintSettledBatchEdgeInterpolationsToGrid(" in app_js
+    assert "paintedEdgeCount = paintAllReachableEdgeInterpolationsToGrid(" in app_js
     assert "paintedEdgeCount," in app_js
 
 

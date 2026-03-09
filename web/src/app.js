@@ -18,6 +18,8 @@ const CAR_FALLBACK_SPEED_KPH = 30;
 const ROAD_CLASS_MOTORWAY = 15;
 const DEFAULT_COLOUR_CYCLE_MINUTES = 60;
 const EDGE_INTERPOLATION_SLACK_SECONDS = 0.75;
+const INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE = 3;
+const FINAL_EDGE_INTERPOLATION_STEP_STRIDE = 1;
 
 export class MinHeap {
   constructor(maxNodeCount) {
@@ -1754,6 +1756,10 @@ export function paintInterpolatedEdgeToGrid(
 
   const alpha = clampInt(Math.round(options.alpha ?? 255), 0, 255);
   const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+  const stepStride = options.stepStride ?? 1;
+  if (!Number.isInteger(stepStride) || stepStride <= 0) {
+    throw new Error('stepStride must be a positive integer');
+  }
   const startX = Math.round(x0);
   const startY = Math.round(y0);
   const endX = Math.round(x1);
@@ -1763,6 +1769,10 @@ export function paintInterpolatedEdgeToGrid(
   let stepIndex = 0;
 
   rasterizeLinePixels(x0, y0, x1, y1, (xPx, yPx) => {
+    if (stepIndex % stepStride !== 0 && stepIndex !== totalSteps) {
+      stepIndex += 1;
+      return;
+    }
     const seconds = interpolateEdgeTravelSeconds(
       startSeconds,
       endSeconds,
@@ -1871,6 +1881,76 @@ export function paintSettledBatchToGrid(pixelGrid, nodePixels, distSeconds, sett
   return paintedCount;
 }
 
+function paintEligibleOutgoingEdgesFromSourceNode(
+  pixelGrid,
+  graph,
+  nodePixels,
+  distSeconds,
+  sourceNodeIndex,
+  allowedModeMask,
+  alpha,
+  colourCycleMinutes,
+  edgeSlackSeconds,
+  stepStride,
+) {
+  if (sourceNodeIndex < 0 || sourceNodeIndex >= graph.header.nNodes) {
+    return 0;
+  }
+
+  const startSeconds = distSeconds[sourceNodeIndex];
+  if (!Number.isFinite(startSeconds)) {
+    return 0;
+  }
+
+  let paintedCount = 0;
+  const x0 = nodePixels.nodePixelX[sourceNodeIndex];
+  const y0 = nodePixels.nodePixelY[sourceNodeIndex];
+  const firstEdgeIndex = graph.nodeU32[sourceNodeIndex * 4 + 2];
+  const edgeCount = graph.nodeU16[sourceNodeIndex * 8 + 6];
+  const endEdgeIndex = firstEdgeIndex + edgeCount;
+
+  for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
+    if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
+      continue;
+    }
+
+    const edgeCostSeconds = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
+    if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
+      continue;
+    }
+
+    const targetNodeIndex = graph.edgeU32[edgeIndex * 3];
+    if (targetNodeIndex < 0 || targetNodeIndex >= graph.header.nNodes) {
+      continue;
+    }
+
+    const targetSeconds = distSeconds[targetNodeIndex];
+    if (!Number.isFinite(targetSeconds)) {
+      continue;
+    }
+
+    const expectedTargetSeconds = startSeconds + edgeCostSeconds;
+    if (expectedTargetSeconds > targetSeconds + edgeSlackSeconds) {
+      continue;
+    }
+
+    const x1 = nodePixels.nodePixelX[targetNodeIndex];
+    const y1 = nodePixels.nodePixelY[targetNodeIndex];
+    paintedCount += paintInterpolatedEdgeToGrid(
+      pixelGrid,
+      x0,
+      y0,
+      startSeconds,
+      x1,
+      y1,
+      expectedTargetSeconds,
+      { alpha, colourCycleMinutes, stepStride },
+    );
+  }
+
+  return paintedCount;
+}
+
 export function paintSettledBatchEdgeInterpolationsToGrid(
   pixelGrid,
   graph,
@@ -1892,66 +1972,75 @@ export function paintSettledBatchEdgeInterpolationsToGrid(
   const alpha = options.alpha ?? 255;
   const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
   const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
+  const stepStride = options.stepStride ?? 1;
   if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
     throw new Error('edgeSlackSeconds must be a non-negative finite number');
+  }
+  if (!Number.isInteger(stepStride) || stepStride <= 0) {
+    throw new Error('stepStride must be a positive integer');
   }
 
   let paintedCount = 0;
 
   for (const sourceNodeIndex of settledBatch) {
-    if (sourceNodeIndex < 0 || sourceNodeIndex >= graph.header.nNodes) {
-      continue;
-    }
+    paintedCount += paintEligibleOutgoingEdgesFromSourceNode(
+      pixelGrid,
+      graph,
+      nodePixels,
+      distSeconds,
+      sourceNodeIndex,
+      allowedModeMask,
+      alpha,
+      colourCycleMinutes,
+      edgeSlackSeconds,
+      stepStride,
+    );
+  }
 
-    const startSeconds = distSeconds[sourceNodeIndex];
-    if (!Number.isFinite(startSeconds)) {
-      continue;
-    }
+  return paintedCount;
+}
 
-    const x0 = nodePixels.nodePixelX[sourceNodeIndex];
-    const y0 = nodePixels.nodePixelY[sourceNodeIndex];
-    const firstEdgeIndex = graph.nodeU32[sourceNodeIndex * 4 + 2];
-    const edgeCount = graph.nodeU16[sourceNodeIndex * 8 + 6];
-    const endEdgeIndex = firstEdgeIndex + edgeCount;
+export function paintAllReachableEdgeInterpolationsToGrid(
+  pixelGrid,
+  graph,
+  nodePixels,
+  distSeconds,
+  allowedModeMask,
+  options = {},
+) {
+  validatePixelGrid(pixelGrid);
+  validateGraphForRouting(graph);
+  validateNodePixels(nodePixels);
+  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
 
-    for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
-      if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
-        continue;
-      }
+  const alpha = options.alpha ?? 255;
+  const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+  const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
+  const stepStride = options.stepStride ?? 1;
+  if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
+    throw new Error('edgeSlackSeconds must be a non-negative finite number');
+  }
+  if (!Number.isInteger(stepStride) || stepStride <= 0) {
+    throw new Error('stepStride must be a positive integer');
+  }
 
-      const edgeCostSeconds = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
-      if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
-        continue;
-      }
-
-      const targetNodeIndex = graph.edgeU32[edgeIndex * 3];
-      if (targetNodeIndex < 0 || targetNodeIndex >= graph.header.nNodes) {
-        continue;
-      }
-
-      const targetSeconds = distSeconds[targetNodeIndex];
-      if (!Number.isFinite(targetSeconds)) {
-        continue;
-      }
-
-      const expectedTargetSeconds = startSeconds + edgeCostSeconds;
-      if (expectedTargetSeconds > targetSeconds + edgeSlackSeconds) {
-        continue;
-      }
-
-      const x1 = nodePixels.nodePixelX[targetNodeIndex];
-      const y1 = nodePixels.nodePixelY[targetNodeIndex];
-      paintedCount += paintInterpolatedEdgeToGrid(
-        pixelGrid,
-        x0,
-        y0,
-        startSeconds,
-        x1,
-        y1,
-        expectedTargetSeconds,
-        { alpha, colourCycleMinutes },
-      );
-    }
+  let paintedCount = 0;
+  for (let sourceNodeIndex = 0; sourceNodeIndex < graph.header.nNodes; sourceNodeIndex += 1) {
+    paintedCount += paintEligibleOutgoingEdgesFromSourceNode(
+      pixelGrid,
+      graph,
+      nodePixels,
+      distSeconds,
+      sourceNodeIndex,
+      allowedModeMask,
+      alpha,
+      colourCycleMinutes,
+      edgeSlackSeconds,
+      stepStride,
+    );
   }
 
   return paintedCount;
@@ -2045,6 +2134,9 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   const alpha = options.alpha ?? 255;
   const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
   const allowedModeMask = searchState.allowedModeMask ?? EDGE_MODE_CAR_BIT;
+  const interactiveEdgeStepStride =
+    options.interactiveEdgeStepStride ?? INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE;
+  const finalEdgeStepStride = options.finalEdgeStepStride ?? FINAL_EDGE_INTERPOLATION_STEP_STRIDE;
   const onSliceExternal = options.onSlice;
   let paintedNodeCount = 0;
   let paintedEdgeCount = 0;
@@ -2061,7 +2153,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
         searchState.distSeconds,
         settledBatch,
         allowedModeMask,
-        { alpha, colourCycleMinutes },
+        { alpha, colourCycleMinutes, stepStride: interactiveEdgeStepStride },
       );
       paintedNodeCount += paintSettledBatchToGrid(
         mapData.pixelGrid,
@@ -2080,6 +2172,23 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   });
 
   if (!runSummary.cancelled) {
+    clearGrid(mapData.pixelGrid);
+    paintedEdgeCount = paintAllReachableEdgeInterpolationsToGrid(
+      mapData.pixelGrid,
+      searchState.graph,
+      mapData.nodePixels,
+      searchState.distSeconds,
+      allowedModeMask,
+      { alpha, colourCycleMinutes, stepStride: finalEdgeStepStride },
+    );
+    paintedNodeCount = paintReachableNodesToGrid(
+      mapData.pixelGrid,
+      mapData.nodePixels,
+      searchState.distSeconds,
+      { alpha, colourCycleMinutes },
+    );
+    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+
     if (paintedNodeCount <= 1) {
       setRoutingStatus(shell, 'Done - no reachable network for selected mode at this start point.');
     } else {
