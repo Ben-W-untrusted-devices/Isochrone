@@ -18,6 +18,7 @@ def test_index_html_uses_native_module_entrypoint() -> None:
     assert 'id="map-region"' in index_html
     assert 'id="canvas-stack"' in index_html
     assert 'id="mode-select"' in index_html
+    assert 'id="mode-select" name="mode-select" multiple' in index_html
     assert '<option value="walk">Walk</option>' in index_html
     assert '<option value="bike">Bike</option>' in index_html
     assert '<option value="car" selected>Car</option>' in index_html
@@ -261,11 +262,12 @@ def test_app_js_has_mode_selector_contract() -> None:
     assert "getElementById('mode-select')" in app_js
     assert "export function bindModeSelectControl(" in app_js
     assert "export function getAllowedModeMaskFromShell(" in app_js
-    assert "const selectedMode = shell.modeSelect?.value;" in app_js
-    assert "if (selectedMode === 'walk')" in app_js
-    assert "if (selectedMode === 'bike')" in app_js
-    assert "if (selectedMode === 'car')" in app_js
-    assert "shell.modeSelect.value = 'car';" in app_js
+    assert "const selectedOptions = shell.modeSelect?.selectedOptions;" in app_js
+    assert "if (optionValue === 'walk')" in app_js
+    assert "if (optionValue === 'bike')" in app_js
+    assert "if (optionValue === 'car')" in app_js
+    assert "if (allowedModeMask === 0)" in app_js
+    assert "option.selected = option.value === 'car';" in app_js
 
 
 def test_app_js_reads_v2_edge_mode_and_speed_metadata_contract() -> None:

@@ -51,12 +51,11 @@ body {
 }
 
 #mode-select {
-  appearance: none;
   border: 1px solid #9eb0bf;
-  background: #f7fbff;
+  background: #ffffff;
   color: #16344a;
   border-radius: 0.35rem;
-  padding: 0.35rem 0.6rem;
+  padding: 0.2rem 0.25rem;
   font-size: 0.85rem;
   cursor: pointer;
   min-width: 8.5rem;

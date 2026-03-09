@@ -790,7 +790,9 @@ export function initializeAppShell(doc) {
   loadingText.textContent = 'Loading district boundaries...';
   setLoadingProgressBar(loadingProgressBar, 0);
   routingStatus.textContent = 'Ready.';
-  modeSelect.value = 'car';
+  for (const option of modeSelect.options) {
+    option.selected = option.value === 'car';
+  }
 
   return {
     mapRegion,
@@ -812,21 +814,32 @@ export function getAllowedModeMaskFromShell(shell) {
     throw new Error('shell is required');
   }
 
-  const selectedMode = shell.modeSelect?.value;
-  if (selectedMode === 'walk') {
-    return EDGE_MODE_WALK_BIT;
+  const selectedOptions = shell.modeSelect?.selectedOptions;
+  let allowedModeMask = 0;
+
+  for (const option of selectedOptions ?? []) {
+    const optionValue = option.value;
+    if (optionValue === 'walk') {
+      allowedModeMask |= EDGE_MODE_WALK_BIT;
+    }
+    if (optionValue === 'bike') {
+      allowedModeMask |= EDGE_MODE_BIKE_BIT;
+    }
+    if (optionValue === 'car') {
+      allowedModeMask |= EDGE_MODE_CAR_BIT;
+    }
   }
-  if (selectedMode === 'bike') {
-    return EDGE_MODE_BIKE_BIT;
-  }
-  if (selectedMode === 'car') {
+
+  if (allowedModeMask === 0) {
+    if (shell.modeSelect) {
+      for (const option of shell.modeSelect.options) {
+        option.selected = option.value === 'car';
+      }
+    }
     return EDGE_MODE_CAR_BIT;
   }
 
-  if (shell.modeSelect) {
-    shell.modeSelect.value = 'car';
-  }
-  return EDGE_MODE_CAR_BIT;
+  return allowedModeMask;
 }
 
 export function bindModeSelectControl(shell) {
@@ -841,7 +854,9 @@ export function bindModeSelectControl(shell) {
     getAllowedModeMaskFromShell(shell);
   };
 
-  shell.modeSelect.value = 'car';
+  for (const option of shell.modeSelect.options) {
+    option.selected = option.value === 'car';
+  }
   getAllowedModeMaskFromShell(shell);
   shell.modeSelect.addEventListener('change', handleSelectChange);
 
