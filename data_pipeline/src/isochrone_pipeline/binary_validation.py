@@ -54,6 +54,8 @@ class BinaryValidationResult:
     sampled_node_count: int
     node_spot_checks: tuple[NodeSpotCheck, ...]
     edge_target_violations: int
+    edge_mode_mask_violations: int
+    edge_maxspeed_violations: int
 
 
 def validate_binary_graph_payload(
@@ -87,20 +89,33 @@ def validate_binary_graph_payload(
     )
 
     edge_target_violations = 0
+    edge_mode_mask_violations = 0
+    edge_maxspeed_violations = 0
     for edge_index in range(header.n_edges):
         offset = header.edge_table_offset + (edge_index * EDGE_RECORD_SIZE)
         edge = parse_edge_record(payload, offset)
         if edge.target_node_index >= header.n_nodes:
             edge_target_violations += 1
+        if header.version >= 2:
+            if edge.mode_mask == 0:
+                edge_mode_mask_violations += 1
+            if edge.maxspeed_kph <= 0 or edge.maxspeed_kph > 200:
+                edge_maxspeed_violations += 1
 
     if edge_target_violations > 0:
         raise ValueError(f"edge target index out of range: count={edge_target_violations}")
+    if edge_mode_mask_violations > 0:
+        raise ValueError(f"edge mode_mask out of range: count={edge_mode_mask_violations}")
+    if edge_maxspeed_violations > 0:
+        raise ValueError(f"edge maxspeed_kph out of range: count={edge_maxspeed_violations}")
 
     return BinaryValidationResult(
         header=header,
         sampled_node_count=len(node_spot_checks),
         node_spot_checks=node_spot_checks,
         edge_target_violations=edge_target_violations,
+        edge_mode_mask_violations=edge_mode_mask_violations,
+        edge_maxspeed_violations=edge_maxspeed_violations,
     )
 
 

@@ -8,7 +8,13 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from isochrone_pipeline.adjacency import build_adjacency_graph
+from isochrone_pipeline.adjacency import (
+    MODE_MASK_BIKE,
+    MODE_MASK_CAR,
+    MODE_MASK_WALK,
+    GraphEdge,
+    build_adjacency_graph,
+)
 from isochrone_pipeline.binary_reader import parse_header
 from isochrone_pipeline.graph_binary import export_graph_binary_bytes
 from isochrone_pipeline.osm_graph_extract import (
@@ -71,6 +77,8 @@ def main() -> int:
         "constraint_tag_presence": tag_coverage.tag_presence,
         "constraint_tag_coverage_ratio": tag_coverage.tag_coverage_ratio,
         "edge_mode_mask_counts": _edge_mode_mask_counts(simplified.graph.edges),
+        "edge_mode_counts": _edge_mode_counts(simplified.graph.edges),
+        "edge_mode_coverage_ratio": _edge_mode_coverage_ratio(simplified.graph.edges),
         "header": {
             "magic": f"0x{header.magic:08X}",
             "version": header.version,
@@ -103,12 +111,37 @@ def main() -> int:
     return 0
 
 
-def _edge_mode_mask_counts(edges: tuple) -> dict[str, int]:
+def _edge_mode_mask_counts(edges: tuple[GraphEdge, ...]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for edge in edges:
         key = str(edge.mode_mask)
         counts[key] = counts.get(key, 0) + 1
     return counts
+
+
+def _edge_mode_counts(edges: tuple[GraphEdge, ...]) -> dict[str, int]:
+    counts = {"walk": 0, "bike": 0, "car": 0}
+    for edge in edges:
+        if edge.mode_mask & MODE_MASK_WALK:
+            counts["walk"] += 1
+        if edge.mode_mask & MODE_MASK_BIKE:
+            counts["bike"] += 1
+        if edge.mode_mask & MODE_MASK_CAR:
+            counts["car"] += 1
+    return counts
+
+
+def _edge_mode_coverage_ratio(edges: tuple[GraphEdge, ...]) -> dict[str, float]:
+    total_edges = len(edges)
+    if total_edges == 0:
+        return {"walk": 0.0, "bike": 0.0, "car": 0.0}
+
+    mode_counts = _edge_mode_counts(edges)
+    return {
+        "walk": mode_counts["walk"] / total_edges,
+        "bike": mode_counts["bike"] / total_edges,
+        "car": mode_counts["car"] / total_edges,
+    }
 
 
 if __name__ == "__main__":

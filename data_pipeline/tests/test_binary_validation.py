@@ -30,7 +30,17 @@ def _graph() -> AdjacencyGraph:
             GraphNode(osm_id=1, x_m=0, y_m=0, first_edge_index=0, edge_count=1, flags=0),
             GraphNode(osm_id=2, x_m=20, y_m=20, first_edge_index=1, edge_count=0, flags=0),
         ),
-        edges=(GraphEdge(source_index=0, target_index=1, cost_seconds=10, flags=0),),
+        edges=(
+            GraphEdge(
+                source_index=0,
+                target_index=1,
+                cost_seconds=10,
+                flags=0,
+                mode_mask=1,
+                maxspeed_kph=30,
+                road_class_id=6,
+            ),
+        ),
         skipped_constraint_way_count=0,
     )
 
@@ -70,7 +80,17 @@ def test_validate_binary_graph_payload_accepts_legacy_v1_header() -> None:
 def test_validate_binary_graph_payload_rejects_out_of_range_edge_target() -> None:
     graph = AdjacencyGraph(
         nodes=(GraphNode(osm_id=1, x_m=0, y_m=0, first_edge_index=0, edge_count=1, flags=0),),
-        edges=(GraphEdge(source_index=0, target_index=99, cost_seconds=10, flags=0),),
+        edges=(
+            GraphEdge(
+                source_index=0,
+                target_index=99,
+                cost_seconds=10,
+                flags=0,
+                mode_mask=1,
+                maxspeed_kph=30,
+                road_class_id=6,
+            ),
+        ),
         skipped_constraint_way_count=0,
     )
 
@@ -102,3 +122,24 @@ def test_validate_binary_graph_payload_rejects_nodes_outside_berlin_bbox() -> No
 
     with pytest.raises(ValueError, match="outside Berlin bounding box"):
         validate_binary_graph_payload(payload, node_sample_count=1, random_seed=0)
+
+
+def test_validate_binary_graph_payload_rejects_zero_mode_mask_for_v2() -> None:
+    payload = bytearray(export_graph_binary_bytes(_graph(), projection=_projection()))
+    # Edge metadata at byte offset: header(64) + nodes(2*16) + edge(8..11 metadata word)
+    edge_metadata_offset = 64 + 32 + 8
+    payload[edge_metadata_offset + 0] = 0
+
+    with pytest.raises(ValueError, match="mode_mask"):
+        validate_binary_graph_payload(bytes(payload))
+
+
+def test_validate_binary_graph_payload_rejects_out_of_bounds_speed_for_v2() -> None:
+    payload = bytearray(export_graph_binary_bytes(_graph(), projection=_projection()))
+    # Set maxspeed_kph=250 in metadata word (little-endian upper 16 bits).
+    edge_metadata_offset = 64 + 32 + 8
+    payload[edge_metadata_offset + 2] = 250
+    payload[edge_metadata_offset + 3] = 0
+
+    with pytest.raises(ValueError, match="maxspeed_kph"):
+        validate_binary_graph_payload(bytes(payload))

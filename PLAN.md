@@ -668,12 +668,12 @@ Tasks
 Estimated time: 50 min
 
 Tasks
-- [ ] Update binary writer/reader/validator for v2 edge records and mode metadata
+- [x] Update binary writer/reader/validator for v2 edge records and mode metadata
 - [ ] Add validation checks:
-  - [ ] `mode_mask != 0` for all exported edges
-  - [ ] speed bounds sane (e.g. `0 < maxspeed_kph <= 200`)
+  - [x] `mode_mask != 0` for all exported edges
+  - [x] speed bounds sane (e.g. `0 < maxspeed_kph <= 200`)
   - [ ] per-mode cost monotonicity/sanity where precomputed costs are stored
-- [ ] Emit export summary metrics for each mode (edge counts and coverage)
+- [x] Emit export summary metrics for each mode (edge counts and coverage)
 
 ### 10.4.5 Runtime read path scaffolding (no UI yet)
 Estimated time: 40 min

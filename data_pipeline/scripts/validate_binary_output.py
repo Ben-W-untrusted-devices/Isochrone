@@ -79,6 +79,8 @@ def main() -> int:
             for check in result.node_spot_checks
         ],
         "edge_target_violations": result.edge_target_violations,
+        "edge_mode_mask_violations": result.edge_mode_mask_violations,
+        "edge_maxspeed_violations": result.edge_maxspeed_violations,
     }
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -87,6 +89,8 @@ def main() -> int:
     print(f"Wrote {args.output}")
     print(f"node_sample_count={summary['node_sample_count']}")
     print(f"edge_target_violations={summary['edge_target_violations']}")
+    print(f"edge_mode_mask_violations={summary['edge_mode_mask_violations']}")
+    print(f"edge_maxspeed_violations={summary['edge_maxspeed_violations']}")
 
     return 0
 
