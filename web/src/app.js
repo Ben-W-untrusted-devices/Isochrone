@@ -942,6 +942,10 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     };
   };
 
+  const pointsMatch = (point, xPx, yPx) => {
+    return point !== null && point.xPx === xPx && point.yPx === yPx;
+  };
+
   const drainQueuedRuns = async () => {
     if (dragRunInFlight || isDisposed) {
       return;
@@ -953,9 +957,23 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
         const nextPoint = queuedDragPoint;
         queuedDragPoint = null;
         try {
-          await runFromNodeIndex(nextPoint.nodeIndex, nextPoint.allowedModeMask, {
+          const runSummary = await runFromNodeIndex(nextPoint.nodeIndex, nextPoint.allowedModeMask, {
             skipFinalFullPass: nextPoint.skipFinalFullPass,
           });
+          if (
+            !isDisposed
+            && !runSummary.cancelled
+            && nextPoint.skipFinalFullPass
+            && isPointerDown
+            && pendingDebouncePoint === null
+            && queuedDragPoint === null
+            && pointsMatch(lastPointerInteractionPoint, nextPoint.xPx, nextPoint.yPx)
+          ) {
+            queueRunFromCanvasPixel(nextPoint.xPx, nextPoint.yPx, {
+              cancelInFlight: false,
+              skipFinalFullPass: false,
+            });
+          }
         } catch (error) {
           setRoutingStatus(shell, 'Routing failed.');
           console.error(error);
@@ -967,10 +985,6 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
         void drainQueuedRuns();
       }
     }
-  };
-
-  const pointsMatch = (point, xPx, yPx) => {
-    return point !== null && point.xPx === xPx && point.yPx === yPx;
   };
 
   const queueRunFromCanvasPixel = (xPx, yPx, queueOptions = {}) => {
