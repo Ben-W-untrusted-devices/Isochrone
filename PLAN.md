@@ -790,6 +790,50 @@ Tasks
 
 ---
 
+# Phase 12 — Post-MVP: UX and Sharing Enhancements (Deferred)
+
+*This phase is explicitly deferred. Additions here are planned for later, not immediate implementation.*
+
+## 12.1 Clarify cyclic legend semantics
+Estimated time: 45 min
+
+Tasks
+- [ ] Update the legend so the final default band is explicitly shown as `45m-60m`, not `45m+`
+- [ ] Make cycle behavior explicit in UI copy (for example: "colours repeat every N minutes")
+- [ ] When the cycle duration changes, recompute and display all band endpoints so each range remains explicit within one cycle
+- [ ] Review and document the UX impact of uneven band widths (0-5, 5-15, 15-30, 30-45, 45-60) during looping and decide whether to keep or replace with even segmentation
+
+## 12.2 Add theme support
+Estimated time: 1 hour
+
+Tasks
+- [ ] Add light mode / dark mode support
+- [ ] Persist user theme preference locally and restore on load
+
+## 12.3 Export rendered result to SVG
+Estimated time: 2 hours
+
+Tasks
+- [ ] Add SVG export action for current rendered isochrone output
+- [ ] Ensure exported SVG preserves map extent, legend scale context, and boundary overlay alignment
+
+## 12.4 Expose routability counts
+Estimated time: 45 min
+
+Tasks
+- [ ] Display how many graph points from the dataset are routable for the current mode selection and start point
+- [ ] Display both absolute count and percentage of total graph points
+
+## 12.5 Persist last interaction in URL
+Estimated time: 1 hour
+
+Tasks
+- [ ] On mouse-up (final interaction point), write location to URL parameters/hash
+- [ ] On page load, read location from URL and restore that start point if valid
+- [ ] Keep URL updates deterministic and bookmark/share safe
+
+---
+
 # Architectural Notes
 
 ## On Web Workers (point 7)
@@ -820,6 +864,7 @@ The pipeline is parameterised from Phase 3.2 onward: `--epsg`, `--input`, `--out
 Post-MVP adds approximately **11.5–13.5 hours** of development:
 - [ ] Phase 10.4 (multimodal road schema + extraction): ~4.5 hours
 - [ ] Phase 11 (GTFS transit): ~7–9 hours
+- [ ] Phase 12 (UX and sharing enhancements): ~5.5 hours
 - [ ] Plus variable time to obtain and verify GTFS licence terms.
 
 ---
