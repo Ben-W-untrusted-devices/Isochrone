@@ -622,8 +622,7 @@ Estimated time: 30 min
 
 Tasks
 - [x] Configure GitHub Pages source via Actions workflow that publishes `/web/` static files plus `graph-walk.bin.gz`
-- [ ] Verify boundary basemap loading, graph loading, and click-to-isochrone in deployed environment
-- [ ] Verify `Content-Encoding: gzip` is being served correctly (check DevTools Network tab)
+- [x] Verify boundary basemap loading, graph loading, and click-to-isochrone in deployed environment
 
 ---
 
@@ -890,3 +889,8 @@ Post-MVP adds approximately **11.5–13.5 hours** of development:
 
 ## Note On Public Polygons
 Public polygons (parks, greens, woods, recreation areas) are useful for context and optional future area-aware routing, but movement inside them is neither always free nor always represented by dense internal paths. Densely wooded and otherwise inaccessible sub-areas exist; in other cases only sparse walkable tracks are mapped. The routing model must therefore treat polygon-level walkability as conditional and constrained, not uniformly traversable.
+
+---
+
+## Final Verification (Run At End)
+- [ ] Verify `Content-Encoding: gzip` is being served correctly in deployed environment (check DevTools Network tab)
