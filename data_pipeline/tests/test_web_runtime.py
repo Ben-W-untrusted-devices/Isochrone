@@ -524,6 +524,11 @@ def test_app_js_has_click_to_routing_wiring_contract() -> None:
         "queueRunFromCanvasPixel(xPx, yPx, { cancelInFlight: true, skipFinalFullPass: true });"
         in app_js
     )
+    assert (
+        "queueRunFromCanvasPixel(xPx, yPx, { cancelInFlight: true, skipFinalFullPass: false });"
+        in app_js
+    )
+    assert "if (hadPendingDebouncedPoint || !wasSameAsLastMove) {" not in app_js
     assert "if (!isPointerDown) {" in app_js
     assert "if (activeRunToken !== null) {" in app_js
     assert "activeRunToken.cancelled = true;" in app_js

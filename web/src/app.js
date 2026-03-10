@@ -1089,13 +1089,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
       event.clientX,
       event.clientY,
     );
-    const hadPendingDebouncedPoint = pendingDebouncePoint !== null;
-    const wasSameAsLastMove = pointsMatch(lastPointerInteractionPoint, xPx, yPx);
     clearDragDebounceTimer();
     pendingDebouncePoint = null;
-    if (hadPendingDebouncedPoint || !wasSameAsLastMove) {
-      queueRunFromCanvasPixel(xPx, yPx, { cancelInFlight: true, skipFinalFullPass: false });
-    }
+    queueRunFromCanvasPixel(xPx, yPx, { cancelInFlight: true, skipFinalFullPass: false });
     isPointerDown = false;
     lastPointerInteractionPoint = null;
     releasePointerCaptureIfHeld(event);
