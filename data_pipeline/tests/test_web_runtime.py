@@ -207,6 +207,8 @@ def test_app_js_has_gpu_travel_time_colourization_contract() -> None:
     assert "function appendEdgeVertexSegment(" in app_js
     assert "const edgeVertexBuilder = createEdgeVertexBufferBuilder();" in app_js
     assert "builder: edgeVertexBuilder" in app_js
+    assert "const edgeTraversalCostSeconds = searchState.edgeTraversalCostSeconds;" in app_js
+    assert "edgeTraversalCostSeconds," in app_js
     assert (
         "const supportsGpuEdgeInterpolation = typeof renderer.drawTravelTimeEdges === 'function';"
     ) in app_js
@@ -367,7 +369,8 @@ def test_app_js_has_walking_dijkstra_contract() -> None:
     assert "heap.push(sourceNodeIndex, 0);" in app_js
     assert "if (Number.isFinite(timeLimitSeconds) && cost > timeLimitSeconds)" in app_js
     assert "if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0)" in app_js
-    assert "const edgeCostSeconds = computeEdgeTraversalCostSeconds(" in app_js
+    assert "const edgeTraversalCostSeconds = getOrCreateEdgeTraversalCostSecondsCache(" in app_js
+    assert "const edgeCostSeconds = getEdgeTraversalCostSeconds(" in app_js
     assert "if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0)" in app_js
     assert "if (nextCost < distSeconds[targetIndex])" in app_js
     assert "heap.decreaseKey(targetIndex, nextCost);" in app_js
@@ -388,6 +391,8 @@ def test_app_js_has_mode_aware_edge_cost_contract() -> None:
     assert "const BIKE_CRUISE_SPEED_KPH = 20;" in app_js
     assert "const ROAD_CLASS_MOTORWAY = 15;" in app_js
     assert "export function computeEdgeTraversalCostSeconds(" in app_js
+    assert "function getOrCreateEdgeTraversalCostSecondsCache(" in app_js
+    assert "function getEdgeTraversalCostSeconds(" in app_js
     assert "const edgeModeMask = graph.edgeModeMask[edgeIndex];" in app_js
     assert "const walkingCostSeconds = graph.edgeU16[edgeIndex * 6 + 2];" in app_js
     assert "const distanceMeters = Math.max(1, walkingCostSeconds * WALKING_SPEED_M_S);" in app_js

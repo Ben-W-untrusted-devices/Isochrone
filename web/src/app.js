@@ -20,6 +20,7 @@ const DEFAULT_COLOUR_CYCLE_MINUTES = 60;
 const EDGE_INTERPOLATION_SLACK_SECONDS = 0.75;
 const INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE = 3;
 const FINAL_EDGE_INTERPOLATION_STEP_STRIDE = 1;
+const EDGE_TRAVERSAL_COST_CACHE_PROPERTY = '__edgeTraversalCostSecondsByModeMask';
 
 export class MinHeap {
   constructor(maxNodeCount) {
@@ -252,6 +253,7 @@ export function createWalkingSearchState(
     throw new Error('allowedModeMask must be a positive 8-bit integer');
   }
 
+  const edgeTraversalCostSeconds = getOrCreateEdgeTraversalCostSecondsCache(graph, allowedModeMask);
   const distSeconds = new Float64Array(graph.header.nNodes);
   distSeconds.fill(Infinity);
   const settled = new Uint8Array(graph.header.nNodes);
@@ -268,6 +270,7 @@ export function createWalkingSearchState(
     sourceNodeIndex,
     timeLimitSeconds,
     allowedModeMask,
+    edgeTraversalCostSeconds,
     distSeconds,
     settled,
     heap,
@@ -315,7 +318,12 @@ export function createWalkingSearchState(
             continue;
           }
           const targetIndex = graph.edgeU32[edgeIndex * 3];
-          const edgeCostSeconds = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
+          const edgeCostSeconds = getEdgeTraversalCostSeconds(
+            graph,
+            edgeIndex,
+            allowedModeMask,
+            edgeTraversalCostSeconds,
+          );
           if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
             continue;
           }
@@ -395,6 +403,46 @@ export function computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMas
   return Number.isFinite(bestCostSeconds) ? bestCostSeconds : Infinity;
 }
 
+function getOrCreateEdgeTraversalCostSecondsCache(graph, allowedModeMask) {
+  validateGraphForRouting(graph);
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+
+  let edgeTraversalCostCacheByModeMask = graph[EDGE_TRAVERSAL_COST_CACHE_PROPERTY];
+  if (!edgeTraversalCostCacheByModeMask || typeof edgeTraversalCostCacheByModeMask !== 'object') {
+    edgeTraversalCostCacheByModeMask = Object.create(null);
+    graph[EDGE_TRAVERSAL_COST_CACHE_PROPERTY] = edgeTraversalCostCacheByModeMask;
+  }
+
+  let edgeTraversalCostSeconds = edgeTraversalCostCacheByModeMask[allowedModeMask];
+  if (
+    !(edgeTraversalCostSeconds instanceof Float32Array)
+    || edgeTraversalCostSeconds.length < graph.header.nEdges
+  ) {
+    edgeTraversalCostSeconds = new Float32Array(graph.header.nEdges);
+    edgeTraversalCostSeconds.fill(Number.NaN);
+    edgeTraversalCostCacheByModeMask[allowedModeMask] = edgeTraversalCostSeconds;
+  }
+
+  return edgeTraversalCostSeconds;
+}
+
+function getEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask, edgeTraversalCostSeconds = null) {
+  if (edgeTraversalCostSeconds) {
+    const cachedCostSeconds = edgeTraversalCostSeconds[edgeIndex];
+    if (!Number.isNaN(cachedCostSeconds)) {
+      return cachedCostSeconds;
+    }
+  }
+
+  const computedCostSeconds = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
+  if (edgeTraversalCostSeconds) {
+    edgeTraversalCostSeconds[edgeIndex] = computedCostSeconds;
+  }
+  return computedCostSeconds;
+}
+
 export function findNearestNodeIndex(graph, xM, yM) {
   validateGraphForRouting(graph);
 
@@ -424,7 +472,7 @@ export function findNearestNodeIndex(graph, xM, yM) {
   return nearestNodeIndex;
 }
 
-function nodeHasAllowedModeOutgoingEdge(graph, nodeIndex, allowedModeMask) {
+function nodeHasAllowedModeOutgoingEdge(graph, nodeIndex, allowedModeMask, edgeTraversalCostSeconds = null) {
   const firstEdgeIndex = graph.nodeU32[nodeIndex * 4 + 2];
   const edgeCount = graph.nodeU16[nodeIndex * 8 + 6];
   const endEdgeIndex = firstEdgeIndex + edgeCount;
@@ -433,7 +481,12 @@ function nodeHasAllowedModeOutgoingEdge(graph, nodeIndex, allowedModeMask) {
     if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
       continue;
     }
-    const edgeCostSeconds = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
+    const edgeCostSeconds = getEdgeTraversalCostSeconds(
+      graph,
+      edgeIndex,
+      allowedModeMask,
+      edgeTraversalCostSeconds,
+    );
     if (Number.isFinite(edgeCostSeconds) && edgeCostSeconds > 0) {
       return true;
     }
@@ -536,6 +589,7 @@ export function findNearestNodeIndexForMode(
   let nearestAnyDistanceSquared = Infinity;
   let nearestModeNodeIndex = -1;
   let nearestModeDistanceSquared = Infinity;
+  const edgeTraversalCostSeconds = getOrCreateEdgeTraversalCostSecondsCache(graph, allowedModeMask);
 
   for (let nodeIndex = 0; nodeIndex < graph.header.nNodes; nodeIndex += 1) {
     const nodeXM = graph.nodeI32[nodeIndex * 4];
@@ -549,7 +603,14 @@ export function findNearestNodeIndexForMode(
       nearestAnyNodeIndex = nodeIndex;
     }
 
-    if (!nodeHasAllowedModeOutgoingEdge(graph, nodeIndex, allowedModeMask)) {
+    if (
+      !nodeHasAllowedModeOutgoingEdge(
+        graph,
+        nodeIndex,
+        allowedModeMask,
+        edgeTraversalCostSeconds,
+      )
+    ) {
       continue;
     }
     if (distanceSquared < nearestModeDistanceSquared) {
@@ -3019,6 +3080,7 @@ function paintEligibleOutgoingEdgesFromSourceNode(
   colourCycleMinutes,
   edgeSlackSeconds,
   stepStride,
+  edgeTraversalCostSeconds,
 ) {
   if (sourceNodeIndex < 0 || sourceNodeIndex >= graph.header.nNodes) {
     return 0;
@@ -3041,7 +3103,12 @@ function paintEligibleOutgoingEdgesFromSourceNode(
       continue;
     }
 
-    const edgeCostSeconds = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
+    const edgeCostSeconds = getEdgeTraversalCostSeconds(
+      graph,
+      edgeIndex,
+      allowedModeMask,
+      edgeTraversalCostSeconds,
+    );
     if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
       continue;
     }
@@ -3100,6 +3167,10 @@ export function paintSettledBatchEdgeInterpolationsToGrid(
   const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
   const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
   const stepStride = options.stepStride ?? 1;
+  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
+    options.edgeTraversalCostSeconds,
+    graph.header.nEdges,
+  );
   if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
     throw new Error('edgeSlackSeconds must be a non-negative finite number');
   }
@@ -3121,6 +3192,7 @@ export function paintSettledBatchEdgeInterpolationsToGrid(
       colourCycleMinutes,
       edgeSlackSeconds,
       stepStride,
+      edgeTraversalCostSeconds,
     );
   }
 
@@ -3147,6 +3219,10 @@ export function paintAllReachableEdgeInterpolationsToGrid(
   const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
   const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
   const stepStride = options.stepStride ?? 1;
+  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
+    options.edgeTraversalCostSeconds,
+    graph.header.nEdges,
+  );
   if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
     throw new Error('edgeSlackSeconds must be a non-negative finite number');
   }
@@ -3167,6 +3243,7 @@ export function paintAllReachableEdgeInterpolationsToGrid(
       colourCycleMinutes,
       edgeSlackSeconds,
       stepStride,
+      edgeTraversalCostSeconds,
     );
   }
 
@@ -3210,6 +3287,7 @@ function paintEligibleOutgoingEdgesFromSourceNodeToTravelTimeGrid(
   allowedModeMask,
   edgeSlackSeconds,
   stepStride,
+  edgeTraversalCostSeconds,
 ) {
   if (sourceNodeIndex < 0 || sourceNodeIndex >= graph.header.nNodes) {
     return 0;
@@ -3232,7 +3310,12 @@ function paintEligibleOutgoingEdgesFromSourceNodeToTravelTimeGrid(
       continue;
     }
 
-    const edgeCostSeconds = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
+    const edgeCostSeconds = getEdgeTraversalCostSeconds(
+      graph,
+      edgeIndex,
+      allowedModeMask,
+      edgeTraversalCostSeconds,
+    );
     if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
       continue;
     }
@@ -3289,6 +3372,10 @@ export function paintSettledBatchEdgeInterpolationsToTravelTimeGrid(
 
   const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
   const stepStride = options.stepStride ?? 1;
+  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
+    options.edgeTraversalCostSeconds,
+    graph.header.nEdges,
+  );
   if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
     throw new Error('edgeSlackSeconds must be a non-negative finite number');
   }
@@ -3307,6 +3394,7 @@ export function paintSettledBatchEdgeInterpolationsToTravelTimeGrid(
       allowedModeMask,
       edgeSlackSeconds,
       stepStride,
+      edgeTraversalCostSeconds,
     );
   }
   return paintedCount;
@@ -3330,6 +3418,10 @@ export function paintAllReachableEdgeInterpolationsToTravelTimeGrid(
 
   const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
   const stepStride = options.stepStride ?? 1;
+  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
+    options.edgeTraversalCostSeconds,
+    graph.header.nEdges,
+  );
   if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
     throw new Error('edgeSlackSeconds must be a non-negative finite number');
   }
@@ -3348,6 +3440,7 @@ export function paintAllReachableEdgeInterpolationsToTravelTimeGrid(
       allowedModeMask,
       edgeSlackSeconds,
       stepStride,
+      edgeTraversalCostSeconds,
     );
   }
   return paintedCount;
@@ -3420,6 +3513,7 @@ function collectEligibleOutgoingTravelTimeEdgeVerticesFromSourceNode(
   allowedModeMask,
   edgeSlackSeconds,
   edgeVertexBuilder,
+  edgeTraversalCostSeconds,
 ) {
   if (sourceNodeIndex < 0 || sourceNodeIndex >= graph.header.nNodes) {
     return 0;
@@ -3442,7 +3536,12 @@ function collectEligibleOutgoingTravelTimeEdgeVerticesFromSourceNode(
       continue;
     }
 
-    const edgeCostSeconds = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
+    const edgeCostSeconds = getEdgeTraversalCostSeconds(
+      graph,
+      edgeIndex,
+      allowedModeMask,
+      edgeTraversalCostSeconds,
+    );
     if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
       continue;
     }
@@ -3494,6 +3593,10 @@ export function collectSettledBatchTravelTimeEdgeVertices(
   }
 
   const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
+  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
+    options.edgeTraversalCostSeconds,
+    graph.header.nEdges,
+  );
   if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
     throw new Error('edgeSlackSeconds must be a non-negative finite number');
   }
@@ -3508,6 +3611,7 @@ export function collectSettledBatchTravelTimeEdgeVertices(
       allowedModeMask,
       edgeSlackSeconds,
       builder,
+      edgeTraversalCostSeconds,
     );
   }
 
@@ -3529,6 +3633,10 @@ export function collectAllReachableTravelTimeEdgeVertices(
   }
 
   const edgeSlackSeconds = options.edgeSlackSeconds ?? EDGE_INTERPOLATION_SLACK_SECONDS;
+  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
+    options.edgeTraversalCostSeconds,
+    graph.header.nEdges,
+  );
   if (!Number.isFinite(edgeSlackSeconds) || edgeSlackSeconds < 0) {
     throw new Error('edgeSlackSeconds must be a non-negative finite number');
   }
@@ -3543,6 +3651,7 @@ export function collectAllReachableTravelTimeEdgeVertices(
       allowedModeMask,
       edgeSlackSeconds,
       builder,
+      edgeTraversalCostSeconds,
     );
   }
 
@@ -3657,6 +3766,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   const alpha = options.alpha ?? 255;
   const colourCycleMinutes = options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
   const allowedModeMask = searchState.allowedModeMask ?? EDGE_MODE_CAR_BIT;
+  const edgeTraversalCostSeconds = searchState.edgeTraversalCostSeconds;
   const nowImpl = options.nowImpl ?? defaultNowMs;
   const statusUpdateIntervalMs = options.statusUpdateIntervalMs ?? 120;
   const skipFinalFullPass = options.skipFinalFullPass ?? false;
@@ -3693,7 +3803,10 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
           searchState.distSeconds,
           settledBatch,
           allowedModeMask,
-          { builder: edgeVertexBuilder },
+          {
+            builder: edgeVertexBuilder,
+            edgeTraversalCostSeconds,
+          },
         );
         paintedEdgeCount += renderer.drawTravelTimeEdges(batchEdgeVertices, {
           cycleMinutes: colourCycleMinutes,
@@ -3710,7 +3823,10 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
           searchState.distSeconds,
           settledBatch,
           allowedModeMask,
-          { stepStride: interactiveEdgeStepStride },
+          {
+            stepStride: interactiveEdgeStepStride,
+            edgeTraversalCostSeconds,
+          },
         );
         paintedNodeCount += paintSettledBatchTravelTimesToGrid(
           mapData.travelTimeGrid,
@@ -3727,7 +3843,12 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
           searchState.distSeconds,
           settledBatch,
           allowedModeMask,
-          { alpha, colourCycleMinutes, stepStride: interactiveEdgeStepStride },
+          {
+            alpha,
+            colourCycleMinutes,
+            stepStride: interactiveEdgeStepStride,
+            edgeTraversalCostSeconds,
+          },
         );
         paintedNodeCount += paintSettledBatchToGrid(
           mapData.pixelGrid,
@@ -3768,7 +3889,10 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
           mapData.nodePixels,
           searchState.distSeconds,
           allowedModeMask,
-          { builder: edgeVertexBuilder },
+          {
+            builder: edgeVertexBuilder,
+            edgeTraversalCostSeconds,
+          },
         );
         paintedEdgeCount = renderer.drawTravelTimeEdges(allEdgeVertices, {
           cycleMinutes: colourCycleMinutes,
@@ -3785,7 +3909,10 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
           mapData.nodePixels,
           searchState.distSeconds,
           allowedModeMask,
-          { stepStride: finalEdgeStepStride },
+          {
+            stepStride: finalEdgeStepStride,
+            edgeTraversalCostSeconds,
+          },
         );
         paintedNodeCount = paintReachableNodesTravelTimesToGrid(
           mapData.travelTimeGrid,
@@ -3801,7 +3928,12 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
           mapData.nodePixels,
           searchState.distSeconds,
           allowedModeMask,
-          { alpha, colourCycleMinutes, stepStride: finalEdgeStepStride },
+          {
+            alpha,
+            colourCycleMinutes,
+            stepStride: finalEdgeStepStride,
+            edgeTraversalCostSeconds,
+          },
         );
         paintedNodeCount = paintReachableNodesToGrid(
           mapData.pixelGrid,
@@ -4160,6 +4292,19 @@ function validateTravelTimeGrid(travelTimeGrid) {
       `travelTimeGrid.seconds length mismatch: got ${travelTimeGrid.seconds.length}, expected ${expectedLength}`,
     );
   }
+}
+
+function validateEdgeTraversalCostSecondsLookup(edgeTraversalCostSeconds, expectedLength) {
+  if (edgeTraversalCostSeconds === null || edgeTraversalCostSeconds === undefined) {
+    return null;
+  }
+  if (!(edgeTraversalCostSeconds instanceof Float32Array)) {
+    throw new Error('edgeTraversalCostSeconds must be a Float32Array when provided');
+  }
+  if (edgeTraversalCostSeconds.length < expectedLength) {
+    throw new Error('edgeTraversalCostSeconds is too short for edge records');
+  }
+  return edgeTraversalCostSeconds;
 }
 
 function validateNodePixels(nodePixels) {
