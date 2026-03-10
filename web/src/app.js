@@ -2732,6 +2732,29 @@ void main(void) {
 
   const renderer = {
     mode: 'webgl',
+    clear(options = {}) {
+      const targetWidthPx = options.widthPx ?? canvas.width;
+      const targetHeightPx = options.heightPx ?? canvas.height;
+      if (!Number.isFinite(targetWidthPx) || targetWidthPx <= 0) {
+        throw new Error('options.widthPx (or canvas.width) must be positive');
+      }
+      if (!Number.isFinite(targetHeightPx) || targetHeightPx <= 0) {
+        throw new Error('options.heightPx (or canvas.height) must be positive');
+      }
+
+      const widthPx = Math.floor(targetWidthPx);
+      const heightPx = Math.floor(targetHeightPx);
+      if (canvas.width !== widthPx) {
+        canvas.width = widthPx;
+      }
+      if (canvas.height !== heightPx) {
+        canvas.height = heightPx;
+      }
+
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    },
     draw(pixelGrid) {
       validatePixelGrid(pixelGrid);
       if (canvas.width !== pixelGrid.widthPx) {
@@ -3616,8 +3639,10 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   }
 
   if (supportsGpuEdgeInterpolation) {
-    clearGrid(mapData.pixelGrid);
-    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+    renderer.clear({
+      widthPx: searchState.graph.header.gridWidthPx,
+      heightPx: searchState.graph.header.gridHeightPx,
+    });
   } else if (supportsGpuTravelTimeRendering) {
     clearTravelTimeGrid(mapData.travelTimeGrid);
     renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
@@ -3734,8 +3759,10 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   if (!runSummary.cancelled) {
     if (!skipFinalFullPass) {
       if (supportsGpuEdgeInterpolation) {
-        clearGrid(mapData.pixelGrid);
-        blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+        renderer.clear({
+          widthPx: searchState.graph.header.gridWidthPx,
+          heightPx: searchState.graph.header.gridHeightPx,
+        });
         const allEdgeVertices = collectAllReachableTravelTimeEdgeVertices(
           searchState.graph,
           mapData.nodePixels,

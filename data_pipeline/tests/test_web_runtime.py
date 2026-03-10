@@ -168,6 +168,7 @@ def test_app_js_has_webgl_blit_renderer_contract() -> None:
     assert "gl.texImage2D(" in app_js
     assert "pixelGrid.rgba" in app_js
     assert "gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);" in app_js
+    assert "clear(options = {}) {" in app_js
     assert "function createCanvas2dIsochroneRenderer(" in app_js
     assert "export function createIsochroneRenderer(" in app_js
     assert "const webglRenderer = createWebGlIsochroneRenderer(canvas, options);" in app_js
@@ -307,6 +308,19 @@ def test_app_js_has_time_sliced_search_contract() -> None:
     assert "setRoutingStatus(shell, formatRoutingStatusPreview(routeElapsedMs));" in app_js
     assert "paintSettledBatchToGrid(" in app_js
     assert "blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);" in app_js
+    assert app_js.count("renderer.clear({") >= 2
+    assert (
+        "if (supportsGpuEdgeInterpolation) {\n"
+        "    clearGrid(mapData.pixelGrid);\n"
+        "    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);\n"
+        "  }"
+    ) not in app_js
+    assert (
+        "if (supportsGpuEdgeInterpolation) {\n"
+        "        clearGrid(mapData.pixelGrid);\n"
+        "        blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);\n"
+        "        const allEdgeVertices = collectAllReachableTravelTimeEdgeVertices("
+    ) not in app_js
 
 
 def test_app_js_has_routing_status_text_contract() -> None:
