@@ -373,6 +373,13 @@ export async function runWalkingIsochroneFromSourceNode(
   );
   const runSummary = await runSearchTimeSlicedWithRendering(shell, mapData, searchState, options);
   if (!runSummary.cancelled) {
+    mapData.lastRoutingSnapshot = {
+      sourceNodeIndex,
+      distSeconds: searchState.distSeconds,
+      allowedModeMask,
+      edgeTraversalCostSeconds: searchState.edgeTraversalCostSeconds,
+      colourCycleMinutes: options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES,
+    };
     runPostMvpTransitStub(mapData.graph, searchState);
   }
   return runSummary;
@@ -846,6 +853,7 @@ export async function initializeMapData(shell, options = {}) {
       nodeSpatialIndex,
       pixelGrid,
       travelTimeGrid,
+      lastRoutingSnapshot: null,
     };
   } catch (error) {
     if (shell.exportSvgButton) {
@@ -3471,7 +3479,35 @@ function isClosedPath(path) {
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', () => {
     const shell = initializeAppShell(globalThis.document);
-    bindSvgExportControl(shell, { exportCurrentRenderedIsochroneSvg });
+    let initializedMapData = null;
+    bindSvgExportControl(shell, {
+      exportCurrentRenderedIsochroneSvg() {
+        if (!initializedMapData || !initializedMapData.lastRoutingSnapshot) {
+          throw new Error('No completed isochrone is available for SVG export yet');
+        }
+        const routingSnapshot = initializedMapData.lastRoutingSnapshot;
+        const edgeVertexData = collectAllReachableTravelTimeEdgeVertices(
+          initializedMapData.graph,
+          initializedMapData.nodePixels,
+          routingSnapshot.distSeconds,
+          routingSnapshot.allowedModeMask,
+          {
+            edgeTraversalCostSeconds: routingSnapshot.edgeTraversalCostSeconds,
+          },
+        );
+        return exportCurrentRenderedIsochroneSvg(shell, {
+          edgeVertexData,
+          cycleMinutes: routingSnapshot.colourCycleMinutes,
+        });
+      },
+      onExportSuccess(result) {
+        setRoutingStatus(shell, `Exported SVG: ${result.filename}`);
+      },
+      onExportError(error) {
+        setRoutingStatus(shell, 'SVG export failed. Run routing once before exporting.');
+        console.error(error);
+      },
+    });
     let routingBinding = null;
     bindModeSelectControl(shell, {
       requestIsochroneRedraw() {
@@ -3480,6 +3516,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
     });
     void initializeMapData(shell)
       .then((mapData) => {
+        initializedMapData = mapData;
         window.addEventListener('resize', () => {
           layoutMapViewportToContainGraph(shell, mapData.graph.header);
           updateDistanceScaleBar(shell, mapData.graph.header);
@@ -3487,6 +3524,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         routingBinding = bindCanvasClickRouting(shell, mapData);
       })
       .catch((error) => {
+        initializedMapData = null;
         console.error(error);
       });
   });
