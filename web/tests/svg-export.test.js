@@ -28,6 +28,12 @@ function createButtonStub() {
   };
 }
 
+function flushTasks() {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
 test('buildRenderedIsochroneSvgDocument layers boundary image and vector isochrone edges', () => {
   const svg = buildRenderedIsochroneSvgDocument({
     widthPx: 640,
@@ -69,7 +75,7 @@ test('buildIsochroneEdgeLineMarkup renders one SVG line per edge segment', () =>
   assert.ok(markup.includes('y2="4"'));
 });
 
-test('bindSvgExportControl invokes export callback on button click', () => {
+test('bindSvgExportControl invokes export callback on button click', async () => {
   const exportSvgButton = createButtonStub();
   const shell = { exportSvgButton };
 
@@ -87,6 +93,7 @@ test('bindSvgExportControl invokes export callback on button click', () => {
 
   exportSvgButton.emit('click');
   assert.equal(exportCount, 1);
+  await flushTasks();
   assert.equal(successCount, 1);
 
   binding.dispose();
@@ -179,4 +186,68 @@ test('exportCurrentRenderedIsochroneSvg emits downloadable vector SVG', () => {
   assert.equal(clicked, 1);
   assert.equal(removed, 1);
   assert.equal(revokedUrl, 'blob:test');
+});
+
+test('exportCurrentRenderedIsochroneSvg allows empty edge data for blank-map export', () => {
+  const shell = {
+    boundaryCanvas: {
+      toDataURL() {
+        return 'data:image/png;base64,AAA';
+      },
+    },
+    isochroneCanvas: {
+      width: 100,
+      height: 80,
+    },
+  };
+  const documentObject = {
+    body: {
+      appendChild() {},
+    },
+    createElement() {
+      return {
+        click() {},
+        remove() {},
+        style: {},
+      };
+    },
+  };
+  const urlObject = {
+    createObjectURL() {
+      return 'blob:test';
+    },
+    revokeObjectURL() {},
+  };
+
+  const result = exportCurrentRenderedIsochroneSvg(shell, {
+    documentObject,
+    urlObject,
+    scheduleRevoke(callback) {
+      callback();
+    },
+  });
+
+  assert.ok(result.svgDocument.includes('<g id="isochrone-edges">'));
+});
+
+test('bindSvgExportControl handles async export callback resolution', async () => {
+  const exportSvgButton = createButtonStub();
+  const shell = { exportSvgButton };
+
+  let successCount = 0;
+  const binding = bindSvgExportControl(shell, {
+    async exportCurrentRenderedIsochroneSvg() {
+      await flushTasks();
+      return { filename: 'isochrone-async.svg' };
+    },
+    onExportSuccess() {
+      successCount += 1;
+    },
+  });
+
+  exportSvgButton.emit('click');
+  await flushTasks();
+  await flushTasks();
+  assert.equal(successCount, 1);
+  binding.dispose();
 });

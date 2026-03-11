@@ -82,7 +82,7 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
 
   const boundaryLayerDataUrl = options.boundaryLayerDataUrl;
   assertDataUrl(boundaryLayerDataUrl, 'boundaryLayerDataUrl');
-  const edgeVertexData = options.edgeVertexData;
+  const edgeVertexData = options.edgeVertexData ?? new Float32Array(0);
   assertEdgeVertexData(edgeVertexData);
   const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
   if (!Number.isFinite(cycleMinutes) || cycleMinutes <= 0) {
@@ -140,7 +140,7 @@ export function exportCurrentRenderedIsochroneSvg(shell, options = {}) {
     widthPx,
     heightPx,
     boundaryLayerDataUrl,
-    edgeVertexData: options.edgeVertexData,
+    edgeVertexData: options.edgeVertexData ?? new Float32Array(0),
     cycleMinutes: options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES,
     title: options.title ?? 'Isochrone export',
   });
@@ -195,18 +195,27 @@ export function bindSvgExportControl(shell, dependencies = {}) {
   }
 
   const handleClick = () => {
+    let exportResult;
     try {
-      const result = exportSvg(shell);
-      if (typeof onExportSuccess === 'function') {
-        onExportSuccess(result);
-      }
+      exportResult = exportSvg(shell);
     } catch (error) {
       if (typeof onExportError === 'function') {
         onExportError(error);
-      } else {
-        console.error(error);
       }
+      return;
     }
+
+    Promise.resolve(exportResult)
+      .then((resolvedResult) => {
+        if (typeof onExportSuccess === 'function') {
+          onExportSuccess(resolvedResult);
+        }
+      })
+      .catch((error) => {
+        if (typeof onExportError === 'function') {
+          onExportError(error);
+        }
+      });
   };
 
   shell.exportSvgButton.addEventListener('click', handleClick);

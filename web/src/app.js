@@ -3481,31 +3481,34 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
     const shell = initializeAppShell(globalThis.document);
     let initializedMapData = null;
     bindSvgExportControl(shell, {
-      exportCurrentRenderedIsochroneSvg() {
-        if (!initializedMapData || !initializedMapData.lastRoutingSnapshot) {
-          throw new Error('No completed isochrone is available for SVG export yet');
+      async exportCurrentRenderedIsochroneSvg() {
+        if (routingBinding && typeof routingBinding.waitForIdle === 'function') {
+          await routingBinding.waitForIdle();
         }
-        const routingSnapshot = initializedMapData.lastRoutingSnapshot;
-        const edgeVertexData = collectAllReachableTravelTimeEdgeVertices(
-          initializedMapData.graph,
-          initializedMapData.nodePixels,
-          routingSnapshot.distSeconds,
-          routingSnapshot.allowedModeMask,
-          {
-            edgeTraversalCostSeconds: routingSnapshot.edgeTraversalCostSeconds,
-          },
-        );
-        return exportCurrentRenderedIsochroneSvg(shell, {
-          edgeVertexData,
-          cycleMinutes: routingSnapshot.colourCycleMinutes,
-        });
+
+        let edgeVertexData = new Float32Array(0);
+        let cycleMinutes = getColourCycleMinutesFromShell(shell);
+        const routingSnapshot = initializedMapData?.lastRoutingSnapshot ?? null;
+        if (initializedMapData && routingSnapshot) {
+          edgeVertexData = collectAllReachableTravelTimeEdgeVertices(
+            initializedMapData.graph,
+            initializedMapData.nodePixels,
+            routingSnapshot.distSeconds,
+            routingSnapshot.allowedModeMask,
+            {
+              edgeTraversalCostSeconds: routingSnapshot.edgeTraversalCostSeconds,
+            },
+          );
+          cycleMinutes = routingSnapshot.colourCycleMinutes;
+        }
+
+        return exportCurrentRenderedIsochroneSvg(shell, { edgeVertexData, cycleMinutes });
       },
       onExportSuccess(result) {
         setRoutingStatus(shell, `Exported SVG: ${result.filename}`);
       },
-      onExportError(error) {
-        setRoutingStatus(shell, 'SVG export failed. Run routing once before exporting.');
-        console.error(error);
+      onExportError() {
+        setRoutingStatus(shell, 'SVG export failed.');
       },
     });
     let routingBinding = null;

@@ -58,6 +58,21 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   let queuedNodeIndex = null;
   let lastCompletedClientPoint = null;
   let lastCompletedNodeIndex = null;
+  let idleWaiterResolvers = [];
+
+  const isRoutingIdle = () =>
+    activeRunToken === null && queuedNodeIndex === null && queuedClientPoint === null;
+
+  const flushIdleWaitersIfIdle = () => {
+    if (!isRoutingIdle() || idleWaiterResolvers.length === 0) {
+      return;
+    }
+    const resolvers = idleWaiterResolvers;
+    idleWaiterResolvers = [];
+    for (const resolveIdle of resolvers) {
+      resolveIdle();
+    }
+  };
 
   const runFromNodeIndex = async (nodeIndex, modeMask = null) => {
     if (isDisposed) {
@@ -108,6 +123,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
       if (!isDisposed && activeRunToken === null && (queuedNodeIndex !== null || queuedClientPoint !== null)) {
         void maybeStartQueuedRun();
       }
+      flushIdleWaitersIfIdle();
       return {
         nodeIndex,
         ...runSummary,
@@ -119,6 +135,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
       if (!isDisposed && activeRunToken === null && (queuedNodeIndex !== null || queuedClientPoint !== null)) {
         void maybeStartQueuedRun();
       }
+      flushIdleWaitersIfIdle();
       throw error;
     }
   };
@@ -163,6 +180,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
           ? runFromCanvasPixel(nextPoint.xPx, nextPoint.yPx)
           : null;
     if (queuedRunPromise === null) {
+      flushIdleWaitersIfIdle();
       return;
     }
 
@@ -174,6 +192,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     if (!isDisposed && activeRunToken === null && (queuedNodeIndex !== null || queuedClientPoint !== null)) {
       await maybeStartQueuedRun();
     }
+    flushIdleWaitersIfIdle();
   };
 
   const queueLatestRunAtClientPoint = (clientX, clientY) => {
@@ -344,6 +363,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     queuedNodeIndex = null;
     lastCompletedClientPoint = null;
     lastCompletedNodeIndex = null;
+    flushIdleWaitersIfIdle();
 
     shell.isochroneCanvas.removeEventListener('pointerdown', handlePointerDown);
     shell.isochroneCanvas.removeEventListener('pointermove', handlePointerMove);
@@ -355,5 +375,13 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     dispose,
     runFromCanvasPixel,
     requestIsochroneRedraw,
+    waitForIdle() {
+      if (isDisposed || isRoutingIdle()) {
+        return Promise.resolve();
+      }
+      return new Promise((resolveIdle) => {
+        idleWaiterResolvers.push(resolveIdle);
+      });
+    },
   };
 }
