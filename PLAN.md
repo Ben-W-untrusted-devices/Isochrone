@@ -816,7 +816,7 @@ Tasks
 - [x] When the cycle duration changes, recompute and display all band endpoints so each range remains explicit within one cycle
 - [x] Review and document the UX impact of uneven band widths (0-5, 5-15, 15-30, 30-45, 45-60) during looping and decide whether to keep or replace with even segmentation
 
-Decision note: keep uneven segmentation for now because shorter-time bins near the origin improve visual discrimination of nearby accessibility differences; this is now stated in the legend copy.
+Decision note: use equal-width segmentation across the cycle (five 20% bands) for predictable looping behavior and clearer legend interpretation.
 
 ## 12.2 Add theme support
 Estimated time: 1 hour

@@ -2082,7 +2082,7 @@ export function renderIsochroneLegend(shell, cycleMinutes) {
     throw new Error('cycleMinutes must be a positive finite number');
   }
 
-  const boundaries = [0, 5 / 60, 15 / 60, 30 / 60, 45 / 60, 1];
+  const boundaries = [0, 1 / 5, 2 / 5, 3 / 5, 4 / 5, 1];
   const colours = [
     [0, 255, 255],
     [64, 255, 64],
@@ -2104,9 +2104,6 @@ export function renderIsochroneLegend(shell, cycleMinutes) {
   }
   legendRows.push(
     `<div class="legend-note">Colours repeat every ${formatLegendDuration(cycleMinutes)}.</div>`,
-  );
-  legendRows.push(
-    '<div class="legend-note">Bands are uneven by design to emphasize short-trip differences.</div>',
   );
 
   shell.isochroneLegend.innerHTML = legendRows.join('');
@@ -2201,20 +2198,20 @@ export function timeToColour(seconds, options = {}) {
   const cyclePositionMinutes = (seconds / 60) % cycleMinutes;
   const cycleRatio = cyclePositionMinutes / cycleMinutes;
 
-  if (cycleRatio <= 5 / 60) {
+  if (cycleRatio <= 1 / 5) {
     return [0, 255, 255];
   }
-  if (cycleRatio <= 15 / 60) {
+  if (cycleRatio <= 2 / 5) {
     return [64, 255, 64];
   }
-  if (cycleRatio <= 30 / 60) {
+  if (cycleRatio <= 3 / 5) {
     return [255, 255, 64];
   }
-  if (cycleRatio <= 45 / 60) {
+  if (cycleRatio <= 4 / 5) {
     return [255, 140, 0];
   }
 
-  // Last quarter band in each cycle.
+  // Final fifth band in each cycle.
   return [255, 64, 160];
 }
 
@@ -2658,16 +2655,16 @@ in vec2 v_uv;
 out vec4 outColor;
 
 vec3 mapCycleColour(float cycleRatio) {
-  if (cycleRatio <= 5.0 / 60.0) {
+  if (cycleRatio <= 1.0 / 5.0) {
     return vec3(0.0, 255.0, 255.0);
   }
-  if (cycleRatio <= 15.0 / 60.0) {
+  if (cycleRatio <= 2.0 / 5.0) {
     return vec3(64.0, 255.0, 64.0);
   }
-  if (cycleRatio <= 30.0 / 60.0) {
+  if (cycleRatio <= 3.0 / 5.0) {
     return vec3(255.0, 255.0, 64.0);
   }
-  if (cycleRatio <= 45.0 / 60.0) {
+  if (cycleRatio <= 4.0 / 5.0) {
     return vec3(255.0, 140.0, 0.0);
   }
   return vec3(255.0, 64.0, 160.0);
@@ -2744,16 +2741,16 @@ in float v_seconds;
 out vec4 outColor;
 
 vec3 mapCycleColour(float cycleRatio) {
-  if (cycleRatio <= 5.0 / 60.0) {
+  if (cycleRatio <= 1.0 / 5.0) {
     return vec3(0.0, 255.0, 255.0);
   }
-  if (cycleRatio <= 15.0 / 60.0) {
+  if (cycleRatio <= 2.0 / 5.0) {
     return vec3(64.0, 255.0, 64.0);
   }
-  if (cycleRatio <= 30.0 / 60.0) {
+  if (cycleRatio <= 3.0 / 5.0) {
     return vec3(255.0, 255.0, 64.0);
   }
-  if (cycleRatio <= 45.0 / 60.0) {
+  if (cycleRatio <= 4.0 / 5.0) {
     return vec3(255.0, 140.0, 0.0);
   }
   return vec3(255.0, 64.0, 160.0);
@@ -2776,16 +2773,16 @@ uniform float u_alpha;
 varying float v_seconds;
 
 vec3 mapCycleColour(float cycleRatio) {
-  if (cycleRatio <= 5.0 / 60.0) {
+  if (cycleRatio <= 1.0 / 5.0) {
     return vec3(0.0, 255.0, 255.0);
   }
-  if (cycleRatio <= 15.0 / 60.0) {
+  if (cycleRatio <= 2.0 / 5.0) {
     return vec3(64.0, 255.0, 64.0);
   }
-  if (cycleRatio <= 30.0 / 60.0) {
+  if (cycleRatio <= 3.0 / 5.0) {
     return vec3(255.0, 255.0, 64.0);
   }
-  if (cycleRatio <= 45.0 / 60.0) {
+  if (cycleRatio <= 4.0 / 5.0) {
     return vec3(255.0, 140.0, 0.0);
   }
   return vec3(255.0, 64.0, 160.0);
