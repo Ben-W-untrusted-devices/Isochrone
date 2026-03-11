@@ -296,6 +296,7 @@ def test_app_js_has_time_sliced_search_contract() -> None:
 
     assert "export async function runSearchTimeSliced(" in app_js
     assert "const sliceBudgetMs = options.sliceBudgetMs ?? 8;" in app_js
+    assert "const frameYieldIntervalSlices = options.frameYieldIntervalSlices ?? 1;" in app_js
     assert "const isCancelled = options.isCancelled ?? (() => false);" in app_js
     assert "const onExpandOneTimingMs = options.onExpandOneTimingMs ?? null;" in app_js
     assert (
@@ -306,6 +307,7 @@ def test_app_js_has_time_sliced_search_contract() -> None:
     assert "while (!isDone(searchState))" in app_js
     assert "if (isCancelled()) {" in app_js
     assert "while (elapsedMs < sliceBudgetMs && !isDone(searchState))" in app_js
+    assert "let slicesSinceLastFrameYield = 0;" in app_js
     assert "onSlice(settledBatch);" in app_js
     assert "const expandStartMs = onExpandOneTimingMs ? nowImpl() : 0;" in app_js
     assert "onExpandOneTimingMs(Math.max(0, nowImpl() - expandStartMs));" in app_js
@@ -315,6 +317,14 @@ def test_app_js_has_time_sliced_search_contract() -> None:
     assert "export async function runSearchTimeSlicedWithRendering(" in app_js
     assert "const statusUpdateIntervalMs = options.statusUpdateIntervalMs ?? 120;" in app_js
     assert "const skipFinalFullPass = options.skipFinalFullPass ?? false;" in app_js
+    assert (
+        "const fullPassFrameYieldIntervalSlices = options.fullPassFrameYieldIntervalSlices ?? 2;"
+        in app_js
+    )
+    assert (
+        "const normalizedFrameYieldIntervalSlices = "
+        "skipFinalFullPass ? 1 : fullPassFrameYieldIntervalSlices;" in app_js
+    )
     assert "let lastStatusUpdateMs = routeStartMs;" in app_js
     assert "if (nowMs - lastStatusUpdateMs >= statusUpdateIntervalMs) {" in app_js
     assert "paintedNodeCount = settledNodeCount;" in app_js
@@ -328,6 +338,7 @@ def test_app_js_has_time_sliced_search_contract() -> None:
     assert "searchFrameWaitMs: 0," in app_js
     assert "onExpandOneTimingMs:" in app_js
     assert "onAnimationFrameWaitTimingMs:" in app_js
+    assert "frameYieldIntervalSlices: normalizedFrameYieldIntervalSlices," in app_js
     assert "routingProfileEnabled || typeof onExpandOneTimingExternal === 'function'" in app_js
     assert (
         "routingProfileEnabled || typeof onAnimationFrameWaitTimingExternal === 'function'"

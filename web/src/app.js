@@ -3705,6 +3705,7 @@ export async function runSearchTimeSliced(searchState, options = {}) {
   validateSearchState(searchState);
 
   const sliceBudgetMs = options.sliceBudgetMs ?? 8;
+  const frameYieldIntervalSlices = options.frameYieldIntervalSlices ?? 1;
   const onSlice = options.onSlice ?? (() => {});
   const isCancelled = options.isCancelled ?? (() => false);
   const onExpandOneTimingMs = options.onExpandOneTimingMs ?? null;
@@ -3714,6 +3715,9 @@ export async function runSearchTimeSliced(searchState, options = {}) {
 
   if (!Number.isFinite(sliceBudgetMs) || sliceBudgetMs <= 0) {
     throw new Error('sliceBudgetMs must be a positive finite number');
+  }
+  if (!Number.isInteger(frameYieldIntervalSlices) || frameYieldIntervalSlices <= 0) {
+    throw new Error('frameYieldIntervalSlices must be a positive integer');
   }
   if (typeof onSlice !== 'function') {
     throw new Error('onSlice must be a function');
@@ -3734,6 +3738,7 @@ export async function runSearchTimeSliced(searchState, options = {}) {
   let totalSettledCount = 0;
   let sliceCount = 0;
   let cancelled = false;
+  let slicesSinceLastFrameYield = 0;
 
   while (!isDone(searchState)) {
     if (isCancelled()) {
@@ -3772,10 +3777,14 @@ export async function runSearchTimeSliced(searchState, options = {}) {
     sliceCount += 1;
 
     if (!isDone(searchState)) {
-      const waitStartMs = onAnimationFrameWaitTimingMs ? nowImpl() : 0;
-      await waitForAnimationFrame(requestAnimationFrameImpl);
-      if (onAnimationFrameWaitTimingMs) {
-        onAnimationFrameWaitTimingMs(Math.max(0, nowImpl() - waitStartMs));
+      slicesSinceLastFrameYield += 1;
+      if (slicesSinceLastFrameYield >= frameYieldIntervalSlices) {
+        const waitStartMs = onAnimationFrameWaitTimingMs ? nowImpl() : 0;
+        await waitForAnimationFrame(requestAnimationFrameImpl);
+        if (onAnimationFrameWaitTimingMs) {
+          onAnimationFrameWaitTimingMs(Math.max(0, nowImpl() - waitStartMs));
+        }
+        slicesSinceLastFrameYield = 0;
       }
     }
   }
@@ -3813,6 +3822,8 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   const nowImpl = options.nowImpl ?? defaultNowMs;
   const statusUpdateIntervalMs = options.statusUpdateIntervalMs ?? 120;
   const skipFinalFullPass = options.skipFinalFullPass ?? false;
+  const fullPassFrameYieldIntervalSlices = options.fullPassFrameYieldIntervalSlices ?? 2;
+  const normalizedFrameYieldIntervalSlices = skipFinalFullPass ? 1 : fullPassFrameYieldIntervalSlices;
   const interactiveEdgeStepStride =
     options.interactiveEdgeStepStride ?? INTERACTIVE_EDGE_INTERPOLATION_STEP_STRIDE;
   const finalEdgeStepStride = options.finalEdgeStepStride ?? FINAL_EDGE_INTERPOLATION_STEP_STRIDE;
@@ -3832,6 +3843,12 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   }
   if (typeof skipFinalFullPass !== 'boolean') {
     throw new Error('skipFinalFullPass must be a boolean');
+  }
+  if (
+    !Number.isInteger(fullPassFrameYieldIntervalSlices)
+    || fullPassFrameYieldIntervalSlices <= 0
+  ) {
+    throw new Error('fullPassFrameYieldIntervalSlices must be a positive integer');
   }
   if (onExpandOneTimingExternal !== null && typeof onExpandOneTimingExternal !== 'function') {
     throw new Error('options.onExpandOneTimingMs must be a function when provided');
@@ -3893,6 +3910,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
 
   const runSummary = await runSearchTimeSliced(searchState, {
     ...options,
+    frameYieldIntervalSlices: normalizedFrameYieldIntervalSlices,
     onExpandOneTimingMs:
       routingProfileEnabled || typeof onExpandOneTimingExternal === 'function'
         ? (elapsedMs) => {
