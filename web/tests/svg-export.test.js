@@ -7,6 +7,7 @@ import {
   buildRenderedIsochroneSvgDocument,
   buildSvgExportFilename,
   exportCurrentRenderedIsochroneSvg,
+  formatIsochroneExportTitle,
 } from '../src/export/svg.js';
 
 function createButtonStub() {
@@ -40,15 +41,25 @@ test('buildRenderedIsochroneSvgDocument layers boundary image and vector isochro
     heightPx: 480,
     boundaryLayerDataUrl: 'data:image/png;base64,AAA',
     edgeVertexData: new Float32Array([10, 12, 0, 22, 24, 0]),
-    title: 'Berlin Isochrone',
+    title: 'Isochrone of Berlin, by Car',
+    scaleBarLabel: '1 km',
+    scaleBarWidthPx: 96,
+    copyrightNotice:
+      'Map data © OpenStreetMap contributors, available under the Open Database License (ODbL): https://www.openstreetmap.org/copyright',
   });
 
   assert.ok(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"'));
   assert.ok(svg.includes('viewBox="0 0 640 480"'));
-  assert.ok(svg.includes('<title>Berlin Isochrone</title>'));
+  assert.ok(svg.includes('<title>Isochrone of Berlin, by Car</title>'));
+  assert.ok(svg.includes('>Isochrone of Berlin, by Car<'));
   assert.ok(svg.includes('href="data:image/png;base64,AAA"'));
   assert.ok(svg.includes('<g id="isochrone-edges">'));
   assert.ok(svg.includes('stroke="rgb(0, 255, 255)"'));
+  assert.ok(svg.includes('id="isochrone-legend"'));
+  assert.ok(svg.includes('Colours repeat every'));
+  assert.ok(svg.includes('id="isochrone-scale"'));
+  assert.ok(svg.includes('>1 km<'));
+  assert.ok(svg.includes('id="isochrone-copyright"'));
 });
 
 test('buildRenderedIsochroneSvgDocument escapes title text', () => {
@@ -66,6 +77,11 @@ test('buildRenderedIsochroneSvgDocument escapes title text', () => {
 test('buildSvgExportFilename formats local timestamp deterministically', () => {
   const fileName = buildSvgExportFilename(new Date(2026, 2, 11, 9, 8, 7));
   assert.equal(fileName, 'isochrone-20260311-090807.svg');
+});
+
+test('formatIsochroneExportTitle composes location and transport mode labels', () => {
+  const title = formatIsochroneExportTitle('Berlin', ['Walk', 'Bike', 'Car']);
+  assert.equal(title, 'Isochrone of Berlin, by Walk, Bike, Car');
 });
 
 test('buildIsochroneEdgeLineMarkup renders one SVG line per edge segment', () => {

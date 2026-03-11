@@ -2,6 +2,7 @@ import {
   BYTES_PER_MEBIBYTE,
   DEFAULT_BOUNDARY_BASEMAP_URL,
   DEFAULT_GRAPH_BINARY_URL,
+  DEFAULT_LOCATION_NAME,
   EDGE_INTERPOLATION_SLACK_SECONDS,
   EDGE_MODE_BIKE_BIT,
   EDGE_MODE_CAR_BIT,
@@ -37,6 +38,7 @@ import { bindCanvasClickRouting as bindCanvasClickRoutingInternal } from './inte
 import {
   bindSvgExportControl,
   exportCurrentRenderedIsochroneSvg,
+  formatIsochroneExportTitle,
 } from './export/svg.js';
 import {
   CYCLE_COLOUR_MAP_GLSL,
@@ -49,7 +51,12 @@ import {
   validateGraphHeaderForBoundaryAlignment,
 } from './core/graph-validation.js';
 
-export { DEFAULT_BOUNDARY_BASEMAP_URL, DEFAULT_GRAPH_BINARY_URL, GRAPH_MAGIC } from './config/constants.js';
+export {
+  DEFAULT_BOUNDARY_BASEMAP_URL,
+  DEFAULT_GRAPH_BINARY_URL,
+  DEFAULT_LOCATION_NAME,
+  GRAPH_MAGIC,
+} from './config/constants.js';
 export { MinHeap, runMinHeapSelfTest } from './core/heap.js';
 export { createWalkingSearchState, computeEdgeTraversalCostSeconds } from './core/routing.js';
 export {
@@ -72,6 +79,7 @@ export {
   buildRenderedIsochroneSvgDocument,
   buildSvgExportFilename,
   exportCurrentRenderedIsochroneSvg,
+  formatIsochroneExportTitle,
 } from './export/svg.js';
 export { timeToColour } from './render/colour.js';
 export function precomputeNodeModeMask(graph) {
@@ -815,6 +823,10 @@ export async function loadGraphBinary(shell, options = {}) {
 export async function initializeMapData(shell, options = {}) {
   const boundaryOptions = options.boundaries ?? {};
   const graphOptions = options.graph ?? {};
+  const locationName =
+    typeof options.locationName === 'string' && options.locationName.trim().length > 0
+      ? options.locationName.trim()
+      : DEFAULT_LOCATION_NAME;
 
   try {
     const boundaryLoad = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
@@ -854,6 +866,7 @@ export async function initializeMapData(shell, options = {}) {
       pixelGrid,
       travelTimeGrid,
       lastRoutingSnapshot: null,
+      locationName,
     };
   } catch (error) {
     if (shell.exportSvgButton) {
@@ -3212,6 +3225,25 @@ export function formatRoutingStatusNoReachable(durationMs = null) {
   return `Done - no reachable network for selected mode at this start point${formatRoutingDurationSuffix(durationMs)}`;
 }
 
+function getSelectedTransportModeLabels(shell) {
+  if (!shell || typeof shell !== 'object' || !shell.modeSelect) {
+    return [];
+  }
+  const labels = [];
+  for (const option of shell.modeSelect.selectedOptions ?? []) {
+    const label =
+      typeof option?.label === 'string' && option.label.trim().length > 0
+        ? option.label.trim()
+        : typeof option?.textContent === 'string' && option.textContent.trim().length > 0
+          ? option.textContent.trim()
+          : null;
+    if (label) {
+      labels.push(label);
+    }
+  }
+  return labels;
+}
+
 function setRoutingStatus(shell, text) {
   shell.routingStatus.textContent = text;
 }
@@ -3486,6 +3518,18 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           await routingBinding.waitForIdle();
         }
 
+        const locationName = initializedMapData?.locationName ?? DEFAULT_LOCATION_NAME;
+        const modeLabels = getSelectedTransportModeLabels(shell);
+        const title = formatIsochroneExportTitle(locationName, modeLabels);
+        const scaleBarLabel = shell.distanceScaleLabel?.textContent?.trim() ?? '';
+        const parsedScaleBarWidthPx = Number.parseFloat(shell.distanceScaleLine?.style?.width ?? '');
+        const scaleBarWidthPx =
+          Number.isFinite(parsedScaleBarWidthPx) && parsedScaleBarWidthPx > 0
+            ? parsedScaleBarWidthPx
+            : 96;
+        const copyrightNotice =
+          shell.routingDisclaimer?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+
         let edgeVertexData = new Float32Array(0);
         let cycleMinutes = getColourCycleMinutesFromShell(shell);
         const routingSnapshot = initializedMapData?.lastRoutingSnapshot ?? null;
@@ -3502,7 +3546,14 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           cycleMinutes = routingSnapshot.colourCycleMinutes;
         }
 
-        return exportCurrentRenderedIsochroneSvg(shell, { edgeVertexData, cycleMinutes });
+        return exportCurrentRenderedIsochroneSvg(shell, {
+          edgeVertexData,
+          cycleMinutes,
+          title,
+          scaleBarLabel,
+          scaleBarWidthPx,
+          copyrightNotice,
+        });
       },
       onExportSuccess(result) {
         setRoutingStatus(shell, `Exported SVG: ${result.filename}`);

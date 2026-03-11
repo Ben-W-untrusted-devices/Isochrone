@@ -34,12 +34,186 @@ function pad2(value) {
   return String(value).padStart(2, '0');
 }
 
+function formatLegendDuration(totalMinutes) {
+  const roundedMinutes = Math.max(0, Math.round(totalMinutes));
+  if (roundedMinutes < 60) {
+    return `${roundedMinutes}m`;
+  }
+  const hours = Math.floor(roundedMinutes / 60);
+  const minutes = roundedMinutes % 60;
+  if (minutes === 0) {
+    return `${hours}h`;
+  }
+  return `${hours}h ${minutes}m`;
+}
+
+function buildLegendEntries(cycleMinutes) {
+  const boundaries = [0, 1 / 5, 2 / 5, 3 / 5, 4 / 5, 1];
+  const colours = [
+    [0, 255, 255],
+    [64, 255, 64],
+    [255, 255, 64],
+    [255, 140, 0],
+    [255, 64, 160],
+  ];
+
+  const entries = [];
+  for (let index = 0; index < colours.length; index += 1) {
+    const rangeStartMinutes = boundaries[index] * cycleMinutes;
+    const rangeEndMinutes = boundaries[index + 1] * cycleMinutes;
+    entries.push({
+      colour: colours[index],
+      label: `${formatLegendDuration(rangeStartMinutes)}-${formatLegendDuration(rangeEndMinutes)}`,
+    });
+  }
+  return entries;
+}
+
+function wrapTextByWords(text, maxCharsPerLine, maxLines) {
+  const normalizedText = text.replace(/\s+/g, ' ').trim();
+  if (normalizedText.length === 0) {
+    return [];
+  }
+  const words = normalizedText.split(' ');
+  const lines = [];
+  let currentLine = '';
+  let truncated = false;
+  let wordIndex = 0;
+  for (; wordIndex < words.length; wordIndex += 1) {
+    const word = words[wordIndex];
+    const candidate = currentLine.length === 0 ? word : `${currentLine} ${word}`;
+    if (candidate.length <= maxCharsPerLine || currentLine.length === 0) {
+      currentLine = candidate;
+      continue;
+    }
+    lines.push(currentLine);
+    currentLine = word;
+    if (lines.length >= maxLines - 1) {
+      break;
+    }
+  }
+  if (wordIndex < words.length - 1) {
+    truncated = true;
+  }
+  if (currentLine.length > 0 && lines.length < maxLines) {
+    lines.push(currentLine);
+  }
+  if (truncated && lines.length > 0) {
+    const lastLineIndex = lines.length - 1;
+    if (!lines[lastLineIndex].endsWith('...')) {
+      lines[lastLineIndex] = `${lines[lastLineIndex]}...`;
+    }
+  }
+  return lines;
+}
+
+export function formatIsochroneExportTitle(locationName, modeLabels) {
+  const normalizedLocation =
+    typeof locationName === 'string' && locationName.trim().length > 0
+      ? locationName.trim()
+      : 'Unknown location';
+  const normalizedModeLabels = [];
+  if (Array.isArray(modeLabels)) {
+    for (const modeLabel of modeLabels) {
+      if (typeof modeLabel === 'string' && modeLabel.trim().length > 0) {
+        normalizedModeLabels.push(modeLabel.trim());
+      }
+    }
+  }
+  const modeList = normalizedModeLabels.length > 0 ? normalizedModeLabels.join(', ') : 'none selected';
+  return `Isochrone of ${normalizedLocation}, by ${modeList}`;
+}
+
 function formatSvgNumber(value) {
   if (!Number.isFinite(value)) {
     return '0';
   }
   const rounded = Math.round(value * 100) / 100;
   return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+}
+
+function buildSvgTitleOverlayMarkup(widthPx, title) {
+  const boxHeight = 32;
+  const titleWidthPx = Math.min(Math.max(220, title.length * 7.2 + 22), Math.max(220, widthPx - 24));
+  return [
+    '  <g id="isochrone-title">',
+    `    <rect x="12" y="12" width="${formatSvgNumber(titleWidthPx)}" height="${boxHeight}" rx="6" fill="#04121a" fill-opacity="0.9" stroke="#82aad2" stroke-opacity="0.55" />`,
+    `    <text x="22" y="33" font-family="Segoe UI, Tahoma, Geneva, Verdana, sans-serif" font-size="15" fill="#dceaf8">${escapeXml(title)}</text>`,
+    '  </g>',
+  ].join('\n');
+}
+
+function buildSvgLegendOverlayMarkup(widthPx, cycleMinutes) {
+  const entries = buildLegendEntries(cycleMinutes);
+  const rowHeight = 17;
+  const boxWidth = 220;
+  const boxHeight = 16 + entries.length * rowHeight + 20;
+  const boxX = Math.max(12, widthPx - boxWidth - 12);
+  const boxY = 12;
+
+  const lines = [
+    '  <g id="isochrone-legend">',
+    `    <rect x="${formatSvgNumber(boxX)}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="6" fill="#04121a" fill-opacity="0.88" stroke="#82aad2" stroke-opacity="0.55" />`,
+  ];
+
+  let textY = boxY + 18;
+  for (const entry of entries) {
+    lines.push(
+      `    <rect x="${formatSvgNumber(boxX + 10)}" y="${formatSvgNumber(textY - 10)}" width="11" height="11" rx="2" fill="rgb(${entry.colour[0]}, ${entry.colour[1]}, ${entry.colour[2]})" />`,
+    );
+    lines.push(
+      `    <text x="${formatSvgNumber(boxX + 28)}" y="${formatSvgNumber(textY)}" font-family="Segoe UI, Tahoma, Geneva, Verdana, sans-serif" font-size="11" fill="#dceaf8">${escapeXml(entry.label)}</text>`,
+    );
+    textY += rowHeight;
+  }
+  lines.push(
+    `    <text x="${formatSvgNumber(boxX + 10)}" y="${formatSvgNumber(boxY + boxHeight - 7)}" font-family="Segoe UI, Tahoma, Geneva, Verdana, sans-serif" font-size="10" fill="#c0d4e8">Colours repeat every ${escapeXml(formatLegendDuration(cycleMinutes))}.</text>`,
+  );
+  lines.push('  </g>');
+  return lines.join('\n');
+}
+
+function buildSvgScaleOverlayMarkup(heightPx, scaleBarLabel, scaleBarWidthPx) {
+  const clampedScaleWidthPx = Math.max(24, Math.round(scaleBarWidthPx));
+  const boxWidth = Math.max(120, clampedScaleWidthPx + 24);
+  const boxHeight = 40;
+  const boxX = 12;
+  const boxY = Math.max(12, heightPx - boxHeight - 12);
+  const lineX = boxX + 12;
+  const lineY = boxY + 14;
+  return [
+    '  <g id="isochrone-scale">',
+    `    <rect x="${boxX}" y="${formatSvgNumber(boxY)}" width="${boxWidth}" height="${boxHeight}" rx="6" fill="#04121a" fill-opacity="0.88" stroke="#82aad2" stroke-opacity="0.55" />`,
+    `    <rect x="${lineX}" y="${formatSvgNumber(lineY)}" width="${clampedScaleWidthPx}" height="5" rx="3" fill="#f6fbff" />`,
+    `    <text x="${formatSvgNumber(boxX + boxWidth / 2)}" y="${formatSvgNumber(boxY + 33)}" text-anchor="middle" font-family="Segoe UI, Tahoma, Geneva, Verdana, sans-serif" font-size="11" fill="#dceaf8">${escapeXml(scaleBarLabel)}</text>`,
+    '  </g>',
+  ].join('\n');
+}
+
+function buildSvgCopyrightOverlayMarkup(widthPx, heightPx, copyrightNotice) {
+  const wrappedLines = wrapTextByWords(copyrightNotice, 58, 3);
+  if (wrappedLines.length === 0) {
+    return '';
+  }
+
+  const boxWidth = 388;
+  const boxHeight = 14 + wrappedLines.length * 12;
+  const boxX = Math.max(12, widthPx - boxWidth - 12);
+  const boxY = Math.max(12, heightPx - boxHeight - 12);
+
+  const lines = [
+    '  <g id="isochrone-copyright">',
+    `    <rect x="${formatSvgNumber(boxX)}" y="${formatSvgNumber(boxY)}" width="${boxWidth}" height="${boxHeight}" rx="6" fill="#04121a" fill-opacity="0.88" stroke="#82aad2" stroke-opacity="0.45" />`,
+  ];
+  let textY = boxY + 16;
+  for (const line of wrappedLines) {
+    lines.push(
+      `    <text x="${formatSvgNumber(boxX + 10)}" y="${formatSvgNumber(textY)}" font-family="Segoe UI, Tahoma, Geneva, Verdana, sans-serif" font-size="10" fill="#c6d7e7">${escapeXml(line)}</text>`,
+    );
+    textY += 12;
+  }
+  lines.push('  </g>');
+  return lines.join('\n');
 }
 
 export function buildIsochroneEdgeLineMarkup(edgeVertexData, options = {}) {
@@ -90,9 +264,25 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
   }
 
   const title = typeof options.title === 'string' ? options.title : 'Isochrone export';
+  const scaleBarLabel =
+    typeof options.scaleBarLabel === 'string' && options.scaleBarLabel.trim().length > 0
+      ? options.scaleBarLabel.trim()
+      : '1 km';
+  const scaleBarWidthPx =
+    Number.isFinite(options.scaleBarWidthPx) && options.scaleBarWidthPx > 0
+      ? options.scaleBarWidthPx
+      : 96;
+  const copyrightNotice =
+    typeof options.copyrightNotice === 'string' && options.copyrightNotice.trim().length > 0
+      ? options.copyrightNotice.trim()
+      : 'Map data © OpenStreetMap contributors, available under the Open Database License (ODbL): https://www.openstreetmap.org/copyright';
   const escapedTitle = escapeXml(title);
   const escapedBoundaryDataUrl = escapeXml(boundaryLayerDataUrl);
   const edgeLines = buildIsochroneEdgeLineMarkup(edgeVertexData, { cycleMinutes });
+  const titleOverlayMarkup = buildSvgTitleOverlayMarkup(widthPx, title);
+  const legendOverlayMarkup = buildSvgLegendOverlayMarkup(widthPx, cycleMinutes);
+  const scaleOverlayMarkup = buildSvgScaleOverlayMarkup(heightPx, scaleBarLabel, scaleBarWidthPx);
+  const copyrightOverlayMarkup = buildSvgCopyrightOverlayMarkup(widthPx, heightPx, copyrightNotice);
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${widthPx}" height="${heightPx}" viewBox="0 0 ${widthPx} ${heightPx}" role="img" aria-label="${escapedTitle}">`,
@@ -101,6 +291,10 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
     '  <g id="isochrone-edges">',
     edgeLines,
     '  </g>',
+    titleOverlayMarkup,
+    legendOverlayMarkup,
+    scaleOverlayMarkup,
+    copyrightOverlayMarkup,
     '</svg>',
   ].join('\n');
 }
@@ -143,6 +337,9 @@ export function exportCurrentRenderedIsochroneSvg(shell, options = {}) {
     edgeVertexData: options.edgeVertexData ?? new Float32Array(0),
     cycleMinutes: options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES,
     title: options.title ?? 'Isochrone export',
+    scaleBarLabel: options.scaleBarLabel,
+    scaleBarWidthPx: options.scaleBarWidthPx,
+    copyrightNotice: options.copyrightNotice,
   });
   const filename = options.filename ?? buildSvgExportFilename(options.now ?? new Date());
 

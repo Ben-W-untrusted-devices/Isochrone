@@ -29,6 +29,7 @@ export function initializeAppShell(doc) {
   const loadingProgressBar = resolvedDocument.getElementById('loading-progress-bar');
   const routingStatus = resolvedDocument.getElementById('routing-status');
   const renderBackendBadge = resolvedDocument.getElementById('render-backend-badge');
+  const routingDisclaimer = resolvedDocument.getElementById('routing-disclaimer');
   const modeSelect = resolvedDocument.getElementById('mode-select');
   const colourCycleMinutesInput = resolvedDocument.getElementById('colour-cycle-minutes');
   const exportSvgButton = resolvedDocument.getElementById('export-svg-button');
@@ -63,6 +64,9 @@ export function initializeAppShell(doc) {
   }
   if (!renderBackendBadge || renderBackendBadge.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="render-backend-badge">');
+  }
+  if (!routingDisclaimer || routingDisclaimer.tagName !== 'DIV') {
+    throw new Error('index.html is missing <div id="routing-disclaimer">');
   }
   if (!modeSelect || modeSelect.tagName !== 'SELECT') {
     throw new Error('index.html is missing <select id="mode-select">');
@@ -124,6 +128,7 @@ export function initializeAppShell(doc) {
     loadingProgressBar,
     routingStatus,
     renderBackendBadge,
+    routingDisclaimer,
     modeSelect,
     colourCycleMinutesInput,
     exportSvgButton,
