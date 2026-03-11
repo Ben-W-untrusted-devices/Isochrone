@@ -374,7 +374,7 @@ def test_app_js_has_time_sliced_search_contract() -> None:
     )
     assert "let lastStatusUpdateMs = routeStartMs;" in app_js
     assert "if (nowMs - lastStatusUpdateMs >= statusUpdateIntervalMs) {" in app_js
-    assert "if (incrementalRender) {" in app_js
+    assert "const incrementalPaintCounts = renderIncrementalSliceByBackend(" in app_js
     assert "paintedNodeCount = settledNodeCount;" in app_js
     assert "if (!skipFinalFullPass) {" in app_js
     assert "setRoutingStatus(shell, formatRoutingStatusPreview(routeElapsedMs));" in app_js
@@ -403,6 +403,25 @@ def test_app_js_has_time_sliced_search_contract() -> None:
     assert "const allEdgeVertices = profileMs('finalCollectMs', () =>" in app_js
     assert "collectAllReachableTravelTimeEdgeVertices(" in app_js
     assert "append: false," in app_js
+
+
+def test_app_js_splits_backend_render_helpers_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "function renderInitialPassByBackend(renderContext) {" in app_js
+    assert (
+        "function renderIncrementalSliceByBackend("
+        "renderContext, settledBatch, settledNodeCount, paintCounts"
+        ") {"
+    ) in app_js
+    assert "function renderFinalPassByBackend(renderContext, paintCounts) {" in app_js
+    assert "const renderContext = {" in app_js
+    assert "renderInitialPassByBackend(renderContext);" in app_js
+    assert "const incrementalPaintCounts = renderIncrementalSliceByBackend(" in app_js
+    assert "renderContext," in app_js
+    assert "settledBatch," in app_js
+    assert "settledNodeCount," in app_js
+    assert "const finalPaintCounts = renderFinalPassByBackend(renderContext, {" in app_js
 
 
 def test_app_js_has_routing_profile_flag_contract() -> None:

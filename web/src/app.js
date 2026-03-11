@@ -3654,6 +3654,243 @@ export async function runSearchTimeSliced(searchState, options = {}) {
   };
 }
 
+function renderInitialPassByBackend(renderContext) {
+  const {
+    incrementalRender,
+    supportsGpuEdgeInterpolation,
+    supportsGpuTravelTimeRendering,
+    renderer,
+    shell,
+    mapData,
+    searchState,
+  } = renderContext;
+  if (!incrementalRender) {
+    return;
+  }
+
+  if (supportsGpuEdgeInterpolation) {
+    renderer.clear({
+      widthPx: searchState.graph.header.gridWidthPx,
+      heightPx: searchState.graph.header.gridHeightPx,
+    });
+  } else if (supportsGpuTravelTimeRendering) {
+    clearTravelTimeGrid(mapData.travelTimeGrid);
+    renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
+      cycleMinutes: getColourCycleMinutesFromShell(shell),
+    });
+  } else {
+    clearGrid(mapData.pixelGrid);
+    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+  }
+}
+
+function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNodeCount, paintCounts) {
+  const {
+    incrementalRender,
+    supportsGpuEdgeInterpolation,
+    supportsGpuTravelTimeRendering,
+    profileMs,
+    searchState,
+    mapData,
+    allowedModeMask,
+    edgeVertexBuilder,
+    edgeTraversalCostSeconds,
+    renderer,
+    colourCycleMinutes,
+    interactiveEdgeStepStride,
+    alpha,
+    shell,
+  } = renderContext;
+  let { paintedNodeCount, paintedEdgeCount } = paintCounts;
+  if (!incrementalRender) {
+    return { paintedNodeCount, paintedEdgeCount };
+  }
+
+  if (supportsGpuEdgeInterpolation) {
+    const batchEdgeVertices = profileMs('onSliceCollectMs', () =>
+      collectSettledBatchTravelTimeEdgeVertices(
+        searchState.graph,
+        mapData.nodePixels,
+        searchState.distSeconds,
+        settledBatch,
+        allowedModeMask,
+        {
+          builder: edgeVertexBuilder,
+          edgeTraversalCostSeconds,
+        },
+      ),
+    );
+    paintedEdgeCount += profileMs('onSliceDrawMs', () =>
+      renderer.drawTravelTimeEdges(batchEdgeVertices, {
+        cycleMinutes: colourCycleMinutes,
+        append: true,
+        widthPx: searchState.graph.header.gridWidthPx,
+        heightPx: searchState.graph.header.gridHeightPx,
+      }),
+    );
+    paintedNodeCount = settledNodeCount;
+  } else if (supportsGpuTravelTimeRendering) {
+    paintedEdgeCount += profileMs('onSlicePaintMs', () =>
+      paintSettledBatchEdgeInterpolationsToTravelTimeGrid(
+        mapData.travelTimeGrid,
+        searchState.graph,
+        mapData.nodePixels,
+        searchState.distSeconds,
+        settledBatch,
+        allowedModeMask,
+        {
+          stepStride: interactiveEdgeStepStride,
+          edgeTraversalCostSeconds,
+        },
+      ),
+    );
+    paintedNodeCount += profileMs('onSlicePaintMs', () =>
+      paintSettledBatchTravelTimesToGrid(
+        mapData.travelTimeGrid,
+        mapData.nodePixels,
+        searchState.distSeconds,
+        settledBatch,
+      ),
+    );
+    profileMs('onSliceDrawMs', () =>
+      renderer.drawTravelTimeGrid(mapData.travelTimeGrid, { cycleMinutes: colourCycleMinutes }),
+    );
+  } else {
+    paintedEdgeCount += profileMs('onSlicePaintMs', () =>
+      paintSettledBatchEdgeInterpolationsToGrid(
+        mapData.pixelGrid,
+        searchState.graph,
+        mapData.nodePixels,
+        searchState.distSeconds,
+        settledBatch,
+        allowedModeMask,
+        {
+          alpha,
+          colourCycleMinutes,
+          stepStride: interactiveEdgeStepStride,
+          edgeTraversalCostSeconds,
+        },
+      ),
+    );
+    paintedNodeCount += profileMs('onSlicePaintMs', () =>
+      paintSettledBatchToGrid(
+        mapData.pixelGrid,
+        mapData.nodePixels,
+        searchState.distSeconds,
+        settledBatch,
+        { alpha, colourCycleMinutes },
+      ),
+    );
+    profileMs('onSliceDrawMs', () =>
+      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid),
+    );
+  }
+
+  return { paintedNodeCount, paintedEdgeCount };
+}
+
+function renderFinalPassByBackend(renderContext, paintCounts) {
+  const {
+    supportsGpuEdgeInterpolation,
+    supportsGpuTravelTimeRendering,
+    profileMs,
+    searchState,
+    mapData,
+    allowedModeMask,
+    edgeVertexBuilder,
+    edgeTraversalCostSeconds,
+    renderer,
+    colourCycleMinutes,
+    finalEdgeStepStride,
+    alpha,
+    shell,
+  } = renderContext;
+  let { paintedNodeCount, paintedEdgeCount } = paintCounts;
+
+  if (supportsGpuEdgeInterpolation) {
+    const allEdgeVertices = profileMs('finalCollectMs', () =>
+      collectAllReachableTravelTimeEdgeVertices(
+        searchState.graph,
+        mapData.nodePixels,
+        searchState.distSeconds,
+        allowedModeMask,
+        {
+          builder: edgeVertexBuilder,
+          edgeTraversalCostSeconds,
+        },
+      ),
+    );
+    paintedEdgeCount = profileMs('finalDrawMs', () =>
+      renderer.drawTravelTimeEdges(allEdgeVertices, {
+        cycleMinutes: colourCycleMinutes,
+        append: false,
+        widthPx: searchState.graph.header.gridWidthPx,
+        heightPx: searchState.graph.header.gridHeightPx,
+      }),
+    );
+    paintedNodeCount = countFiniteTravelTimes(searchState.distSeconds);
+  } else if (supportsGpuTravelTimeRendering) {
+    profileMs('finalDrawMs', () => {
+      clearTravelTimeGrid(mapData.travelTimeGrid);
+    });
+    paintedEdgeCount = profileMs('finalPaintMs', () =>
+      paintAllReachableEdgeInterpolationsToTravelTimeGrid(
+        mapData.travelTimeGrid,
+        searchState.graph,
+        mapData.nodePixels,
+        searchState.distSeconds,
+        allowedModeMask,
+        {
+          stepStride: finalEdgeStepStride,
+          edgeTraversalCostSeconds,
+        },
+      ),
+    );
+    paintedNodeCount = profileMs('finalPaintMs', () =>
+      paintReachableNodesTravelTimesToGrid(
+        mapData.travelTimeGrid,
+        mapData.nodePixels,
+        searchState.distSeconds,
+      ),
+    );
+    profileMs('finalDrawMs', () =>
+      renderer.drawTravelTimeGrid(mapData.travelTimeGrid, { cycleMinutes: colourCycleMinutes }),
+    );
+  } else {
+    profileMs('finalDrawMs', () => {
+      clearGrid(mapData.pixelGrid);
+    });
+    paintedEdgeCount = profileMs('finalPaintMs', () =>
+      paintAllReachableEdgeInterpolationsToGrid(
+        mapData.pixelGrid,
+        searchState.graph,
+        mapData.nodePixels,
+        searchState.distSeconds,
+        allowedModeMask,
+        {
+          alpha,
+          colourCycleMinutes,
+          stepStride: finalEdgeStepStride,
+          edgeTraversalCostSeconds,
+        },
+      ),
+    );
+    paintedNodeCount = profileMs('finalPaintMs', () =>
+      paintReachableNodesToGrid(
+        mapData.pixelGrid,
+        mapData.nodePixels,
+        searchState.distSeconds,
+        { alpha, colourCycleMinutes },
+      ),
+    );
+    profileMs('finalDrawMs', () =>
+      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid),
+    );
+  }
+
+  return { paintedNodeCount, paintedEdgeCount };
+}
+
 export async function runSearchTimeSlicedWithRendering(shell, mapData, searchState, options = {}) {
   if (!shell || !shell.isochroneCanvas) {
     throw new Error('shell.isochroneCanvas is required');
@@ -3748,24 +3985,26 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
       routingProfile[field] += Math.max(0, nowImpl() - startedMs);
     }
   };
+  const renderContext = {
+    shell,
+    mapData,
+    searchState,
+    renderer,
+    supportsGpuEdgeInterpolation,
+    supportsGpuTravelTimeRendering,
+    incrementalRender,
+    profileMs,
+    allowedModeMask,
+    edgeVertexBuilder,
+    edgeTraversalCostSeconds,
+    colourCycleMinutes,
+    interactiveEdgeStepStride,
+    finalEdgeStepStride,
+    alpha,
+  };
 
   profileMs('initialPassMs', () => {
-    if (incrementalRender) {
-      if (supportsGpuEdgeInterpolation) {
-        renderer.clear({
-          widthPx: searchState.graph.header.gridWidthPx,
-          heightPx: searchState.graph.header.gridHeightPx,
-        });
-      } else if (supportsGpuTravelTimeRendering) {
-        clearTravelTimeGrid(mapData.travelTimeGrid);
-        renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
-          cycleMinutes: getColourCycleMinutesFromShell(shell),
-        });
-      } else {
-        clearGrid(mapData.pixelGrid);
-        blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
-      }
-    }
+    renderInitialPassByBackend(renderContext);
   });
   setRoutingStatus(shell, formatRoutingStatusCalculating(0));
 
@@ -3799,87 +4038,17 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
         : onAnimationFrameWaitTimingExternal,
     onSlice(settledBatch) {
       settledNodeCount += settledBatch.length;
-      if (incrementalRender) {
-        if (supportsGpuEdgeInterpolation) {
-          const batchEdgeVertices = profileMs('onSliceCollectMs', () =>
-            collectSettledBatchTravelTimeEdgeVertices(
-              searchState.graph,
-              mapData.nodePixels,
-              searchState.distSeconds,
-              settledBatch,
-              allowedModeMask,
-              {
-                builder: edgeVertexBuilder,
-                edgeTraversalCostSeconds,
-              },
-            ),
-          );
-          paintedEdgeCount += profileMs('onSliceDrawMs', () =>
-            renderer.drawTravelTimeEdges(batchEdgeVertices, {
-              cycleMinutes: colourCycleMinutes,
-              append: true,
-              widthPx: searchState.graph.header.gridWidthPx,
-              heightPx: searchState.graph.header.gridHeightPx,
-            }),
-          );
-          paintedNodeCount = settledNodeCount;
-        } else if (supportsGpuTravelTimeRendering) {
-          paintedEdgeCount += profileMs('onSlicePaintMs', () =>
-            paintSettledBatchEdgeInterpolationsToTravelTimeGrid(
-              mapData.travelTimeGrid,
-              searchState.graph,
-              mapData.nodePixels,
-              searchState.distSeconds,
-              settledBatch,
-              allowedModeMask,
-              {
-                stepStride: interactiveEdgeStepStride,
-                edgeTraversalCostSeconds,
-              },
-            ),
-          );
-          paintedNodeCount += profileMs('onSlicePaintMs', () =>
-            paintSettledBatchTravelTimesToGrid(
-              mapData.travelTimeGrid,
-              mapData.nodePixels,
-              searchState.distSeconds,
-              settledBatch,
-            ),
-          );
-          profileMs('onSliceDrawMs', () =>
-            renderer.drawTravelTimeGrid(mapData.travelTimeGrid, { cycleMinutes: colourCycleMinutes }),
-          );
-        } else {
-          paintedEdgeCount += profileMs('onSlicePaintMs', () =>
-            paintSettledBatchEdgeInterpolationsToGrid(
-              mapData.pixelGrid,
-              searchState.graph,
-              mapData.nodePixels,
-              searchState.distSeconds,
-              settledBatch,
-              allowedModeMask,
-              {
-                alpha,
-                colourCycleMinutes,
-                stepStride: interactiveEdgeStepStride,
-                edgeTraversalCostSeconds,
-              },
-            ),
-          );
-          paintedNodeCount += profileMs('onSlicePaintMs', () =>
-            paintSettledBatchToGrid(
-              mapData.pixelGrid,
-              mapData.nodePixels,
-              searchState.distSeconds,
-              settledBatch,
-              { alpha, colourCycleMinutes },
-            ),
-          );
-          profileMs('onSliceDrawMs', () =>
-            blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid),
-          );
-        }
-      }
+      const incrementalPaintCounts = renderIncrementalSliceByBackend(
+        renderContext,
+        settledBatch,
+        settledNodeCount,
+        {
+          paintedNodeCount,
+          paintedEdgeCount,
+        },
+      );
+      paintedNodeCount = incrementalPaintCounts.paintedNodeCount;
+      paintedEdgeCount = incrementalPaintCounts.paintedEdgeCount;
       if (normalizedStatusUpdateIntervalMs <= 0) {
         setRoutingStatus(shell, formatRoutingStatusCalculating(settledNodeCount));
         lastStatusUpdateMs = nowImpl();
@@ -3900,86 +4069,12 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
 
   if (!runSummary.cancelled) {
     if (!skipFinalFullPass) {
-      if (supportsGpuEdgeInterpolation) {
-        const allEdgeVertices = profileMs('finalCollectMs', () =>
-          collectAllReachableTravelTimeEdgeVertices(
-            searchState.graph,
-            mapData.nodePixels,
-            searchState.distSeconds,
-            allowedModeMask,
-            {
-              builder: edgeVertexBuilder,
-              edgeTraversalCostSeconds,
-            },
-          ),
-        );
-        paintedEdgeCount = profileMs('finalDrawMs', () =>
-          renderer.drawTravelTimeEdges(allEdgeVertices, {
-            cycleMinutes: colourCycleMinutes,
-            append: false,
-            widthPx: searchState.graph.header.gridWidthPx,
-            heightPx: searchState.graph.header.gridHeightPx,
-          }),
-        );
-        paintedNodeCount = countFiniteTravelTimes(searchState.distSeconds);
-      } else if (supportsGpuTravelTimeRendering) {
-        profileMs('finalDrawMs', () => {
-          clearTravelTimeGrid(mapData.travelTimeGrid);
-        });
-        paintedEdgeCount = profileMs('finalPaintMs', () =>
-          paintAllReachableEdgeInterpolationsToTravelTimeGrid(
-            mapData.travelTimeGrid,
-            searchState.graph,
-            mapData.nodePixels,
-            searchState.distSeconds,
-            allowedModeMask,
-            {
-              stepStride: finalEdgeStepStride,
-              edgeTraversalCostSeconds,
-            },
-          ),
-        );
-        paintedNodeCount = profileMs('finalPaintMs', () =>
-          paintReachableNodesTravelTimesToGrid(
-            mapData.travelTimeGrid,
-            mapData.nodePixels,
-            searchState.distSeconds,
-          ),
-        );
-        profileMs('finalDrawMs', () =>
-          renderer.drawTravelTimeGrid(mapData.travelTimeGrid, { cycleMinutes: colourCycleMinutes }),
-        );
-      } else {
-        profileMs('finalDrawMs', () => {
-          clearGrid(mapData.pixelGrid);
-        });
-        paintedEdgeCount = profileMs('finalPaintMs', () =>
-          paintAllReachableEdgeInterpolationsToGrid(
-            mapData.pixelGrid,
-            searchState.graph,
-            mapData.nodePixels,
-            searchState.distSeconds,
-            allowedModeMask,
-            {
-              alpha,
-              colourCycleMinutes,
-              stepStride: finalEdgeStepStride,
-              edgeTraversalCostSeconds,
-            },
-          ),
-        );
-        paintedNodeCount = profileMs('finalPaintMs', () =>
-          paintReachableNodesToGrid(
-            mapData.pixelGrid,
-            mapData.nodePixels,
-            searchState.distSeconds,
-            { alpha, colourCycleMinutes },
-          ),
-        );
-        profileMs('finalDrawMs', () =>
-          blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid),
-        );
-      }
+      const finalPaintCounts = renderFinalPassByBackend(renderContext, {
+        paintedNodeCount,
+        paintedEdgeCount,
+      });
+      paintedNodeCount = finalPaintCounts.paintedNodeCount;
+      paintedEdgeCount = finalPaintCounts.paintedEdgeCount;
     }
 
     if (!skipFinalFullPass && supportsGpuEdgeInterpolation && paritySampleCount > 0) {
