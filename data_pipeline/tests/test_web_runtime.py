@@ -352,12 +352,9 @@ def test_app_js_has_time_sliced_search_contract() -> None:
         "    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);\n"
         "  }"
     ) not in app_js
-    assert (
-        "if (supportsGpuEdgeInterpolation) {\n"
-        "        clearGrid(mapData.pixelGrid);\n"
-        "        blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);\n"
-        "        const allEdgeVertices = collectAllReachableTravelTimeEdgeVertices("
-    ) not in app_js
+    assert "const allEdgeVertices = profileMs('finalCollectMs', () =>" in app_js
+    assert "collectAllReachableTravelTimeEdgeVertices(" in app_js
+    assert "append: false," in app_js
 
 
 def test_app_js_has_routing_profile_flag_contract() -> None:

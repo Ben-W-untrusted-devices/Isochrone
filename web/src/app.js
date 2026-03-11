@@ -4044,7 +4044,26 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
   if (!runSummary.cancelled) {
     if (!skipFinalFullPass) {
       if (supportsGpuEdgeInterpolation) {
-        // WebGL edge mode already rendered all settled edges incrementally during onSlice.
+        const allEdgeVertices = profileMs('finalCollectMs', () =>
+          collectAllReachableTravelTimeEdgeVertices(
+            searchState.graph,
+            mapData.nodePixels,
+            searchState.distSeconds,
+            allowedModeMask,
+            {
+              builder: edgeVertexBuilder,
+              edgeTraversalCostSeconds,
+            },
+          ),
+        );
+        paintedEdgeCount = profileMs('finalDrawMs', () =>
+          renderer.drawTravelTimeEdges(allEdgeVertices, {
+            cycleMinutes: colourCycleMinutes,
+            append: false,
+            widthPx: searchState.graph.header.gridWidthPx,
+            heightPx: searchState.graph.header.gridHeightPx,
+          }),
+        );
         paintedNodeCount = countFiniteTravelTimes(searchState.distSeconds);
       } else if (supportsGpuTravelTimeRendering) {
         profileMs('finalDrawMs', () => {
