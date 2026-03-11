@@ -24,6 +24,12 @@ import {
   persistNodeIndexToLocation,
 } from '../src/core/coords.js';
 import {
+  getAllowedModeMaskFromShell,
+  getColourCycleMinutesFromShell,
+  initializeAppShell,
+} from '../src/ui/orchestration.js';
+import { bindCanvasClickRouting } from '../src/interaction/canvas-routing.js';
+import {
   CYCLE_COLOUR_MAP_GLSL,
   DEFAULT_COLOUR_CYCLE_MINUTES,
   timeToColour,
@@ -50,4 +56,19 @@ test('app re-exports colour module symbols', () => {
   assert.equal(appTimeToColour, timeToColour);
   assert.equal(DEFAULT_COLOUR_CYCLE_MINUTES, 60);
   assert.ok(CYCLE_COLOUR_MAP_GLSL.includes('mapCycleColour'));
+});
+
+test('ui/input orchestration modules export expected entrypoints', async () => {
+  const app = await import('../src/app.js');
+
+  assert.equal(typeof initializeAppShell, 'function');
+  assert.equal(typeof getAllowedModeMaskFromShell, 'function');
+  assert.equal(typeof getColourCycleMinutesFromShell, 'function');
+  assert.equal(typeof bindCanvasClickRouting, 'function');
+
+  // Pure shell helpers are direct re-exports from app.js after split.
+  assert.equal(app.initializeAppShell, initializeAppShell);
+  assert.equal(app.getAllowedModeMaskFromShell, getAllowedModeMaskFromShell);
+  assert.equal(app.getColourCycleMinutesFromShell, getColourCycleMinutesFromShell);
+  assert.equal(typeof app.bindCanvasClickRouting, 'function');
 });

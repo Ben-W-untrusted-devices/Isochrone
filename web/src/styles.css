@@ -50,10 +50,6 @@ body {
   min-width: 5rem;
 }
 
-.mode-select {
-  font-size: 0.9rem;
-}
-
 #mode-select {
   border: 1px solid #9eb0bf;
   background: #ffffff;
@@ -86,9 +82,6 @@ body {
   max-width: 100%;
   max-height: 100%;
   aspect-ratio: var(--map-aspect-ratio, 4 / 3);
-}
-
-#canvas-stack {
   margin: auto;
 }
 
