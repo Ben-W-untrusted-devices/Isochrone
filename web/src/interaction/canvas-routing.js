@@ -201,13 +201,14 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     void maybeStartQueuedRun();
   };
 
-  const queueLatestRunAtNodeIndex = (nodeIndex) => {
+  const queueLatestRunAtNodeIndex = (nodeIndex, options = {}) => {
     if (isDisposed) {
       return false;
     }
     if (!Number.isInteger(nodeIndex) || nodeIndex < 0 || nodeIndex >= mapData.graph.header.nNodes) {
       return false;
     }
+    const force = options.force === true;
     if (
       queuedNodeIndex !== null
       && queuedNodeIndex === nodeIndex
@@ -215,11 +216,14 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
       return true;
     }
     if (
+      !force
+      && (
       activeRunToken === null
       && queuedNodeIndex === null
       && queuedClientPoint === null
       && lastCompletedNodeIndex !== null
       && lastCompletedNodeIndex === nodeIndex
+      )
     ) {
       return true;
     }
@@ -239,7 +243,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     if (candidateNodeIndex === null) {
       return false;
     }
-    return queueLatestRunAtNodeIndex(candidateNodeIndex);
+    return queueLatestRunAtNodeIndex(candidateNodeIndex, { force: true });
   };
 
   const releasePointerCaptureIfHeld = (event) => {
