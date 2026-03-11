@@ -1,5 +1,11 @@
-import { LAST_CLICKED_NODE_QUERY_PARAM } from '../config/constants.js';
+import {
+  COLOUR_CYCLE_QUERY_PARAM,
+  LAST_CLICKED_NODE_QUERY_PARAM,
+  MODE_SELECTION_QUERY_PARAM,
+} from '../config/constants.js';
 import { validateGraphForRouting } from './graph-validation.js';
+
+const CANONICAL_MODE_VALUES = ['walk', 'bike', 'car'];
 
 export function mapCanvasPixelToGraphMeters(graph, xPx, yPx) {
   validateGraphForRouting(graph);
@@ -87,6 +93,117 @@ export function persistNodeIndexToLocation(nodeIndex, options = {}) {
   }
 
   nextUrl.searchParams.set(LAST_CLICKED_NODE_QUERY_PARAM, nodeText);
+  historyObject.replaceState(null, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+  return true;
+}
+
+export function parseModeValuesFromLocationSearch(locationSearch) {
+  if (typeof locationSearch !== 'string' || locationSearch.length === 0) {
+    return null;
+  }
+
+  const params = new URLSearchParams(locationSearch);
+  const rawModes = params.get(MODE_SELECTION_QUERY_PARAM);
+  if (rawModes === null || rawModes.length === 0) {
+    return null;
+  }
+
+  const selected = new Set();
+  for (const rawModeValue of rawModes.split(',')) {
+    const modeValue = rawModeValue.trim();
+    if (CANONICAL_MODE_VALUES.includes(modeValue)) {
+      selected.add(modeValue);
+    }
+  }
+
+  if (selected.size === 0) {
+    return null;
+  }
+  return CANONICAL_MODE_VALUES.filter((modeValue) => selected.has(modeValue));
+}
+
+export function persistModeValuesToLocation(modeValues, options = {}) {
+  if (!Array.isArray(modeValues)) {
+    throw new Error('modeValues must be an array');
+  }
+  const selected = new Set();
+  for (const modeValue of modeValues) {
+    if (typeof modeValue !== 'string' || !CANONICAL_MODE_VALUES.includes(modeValue)) {
+      throw new Error(`invalid mode value: ${modeValue}`);
+    }
+    selected.add(modeValue);
+  }
+  if (selected.size === 0) {
+    throw new Error('modeValues must include at least one mode');
+  }
+
+  const locationObject = options.locationObject ?? globalThis.location ?? null;
+  const historyObject = options.historyObject ?? globalThis.history ?? null;
+  if (!locationObject || typeof locationObject.href !== 'string') {
+    return false;
+  }
+  if (!historyObject || typeof historyObject.replaceState !== 'function') {
+    return false;
+  }
+
+  const nextUrl = new URL(locationObject.href);
+  const canonicalValue = CANONICAL_MODE_VALUES.filter((modeValue) => selected.has(modeValue)).join(',');
+  if (nextUrl.searchParams.get(MODE_SELECTION_QUERY_PARAM) === canonicalValue) {
+    return false;
+  }
+
+  nextUrl.searchParams.set(MODE_SELECTION_QUERY_PARAM, canonicalValue);
+  historyObject.replaceState(null, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+  return true;
+}
+
+export function parseColourCycleMinutesFromLocationSearch(locationSearch, options = {}) {
+  const minMinutes = options.minMinutes ?? 5;
+  const maxMinutes = options.maxMinutes ?? 24 * 60;
+  if (!Number.isInteger(minMinutes) || !Number.isInteger(maxMinutes) || minMinutes > maxMinutes) {
+    throw new Error('minMinutes/maxMinutes must be valid integer bounds');
+  }
+  if (typeof locationSearch !== 'string' || locationSearch.length === 0) {
+    return null;
+  }
+
+  const params = new URLSearchParams(locationSearch);
+  const rawCycle = params.get(COLOUR_CYCLE_QUERY_PARAM);
+  if (rawCycle === null) {
+    return null;
+  }
+  if (!/^\d+$/.test(rawCycle)) {
+    return null;
+  }
+
+  const parsedMinutes = Number.parseInt(rawCycle, 10);
+  if (!Number.isFinite(parsedMinutes)) {
+    return null;
+  }
+  return clampInt(parsedMinutes, minMinutes, maxMinutes);
+}
+
+export function persistColourCycleMinutesToLocation(cycleMinutes, options = {}) {
+  if (!Number.isInteger(cycleMinutes) || cycleMinutes <= 0) {
+    throw new Error('cycleMinutes must be a positive integer');
+  }
+
+  const locationObject = options.locationObject ?? globalThis.location ?? null;
+  const historyObject = options.historyObject ?? globalThis.history ?? null;
+  if (!locationObject || typeof locationObject.href !== 'string') {
+    return false;
+  }
+  if (!historyObject || typeof historyObject.replaceState !== 'function') {
+    return false;
+  }
+
+  const nextUrl = new URL(locationObject.href);
+  const cycleText = String(cycleMinutes);
+  if (nextUrl.searchParams.get(COLOUR_CYCLE_QUERY_PARAM) === cycleText) {
+    return false;
+  }
+
+  nextUrl.searchParams.set(COLOUR_CYCLE_QUERY_PARAM, cycleText);
   historyObject.replaceState(null, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
   return true;
 }

@@ -7,7 +7,11 @@ import {
   createWalkingSearchState as appCreateWalkingSearchState,
   mapCanvasPixelToGraphMeters as appMapCanvasPixelToGraphMeters,
   mapClientPointToCanvasPixel as appMapClientPointToCanvasPixel,
+  parseColourCycleMinutesFromLocationSearch as appParseColourCycleMinutesFromLocationSearch,
+  parseModeValuesFromLocationSearch as appParseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch as appParseNodeIndexFromLocationSearch,
+  persistColourCycleMinutesToLocation as appPersistColourCycleMinutesToLocation,
+  persistModeValuesToLocation as appPersistModeValuesToLocation,
   persistNodeIndexToLocation as appPersistNodeIndexToLocation,
   runMinHeapSelfTest as appRunMinHeapSelfTest,
   timeToColour as appTimeToColour,
@@ -20,7 +24,11 @@ import {
 import {
   mapCanvasPixelToGraphMeters,
   mapClientPointToCanvasPixel,
+  parseColourCycleMinutesFromLocationSearch,
+  parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
+  persistColourCycleMinutesToLocation,
+  persistModeValuesToLocation,
   persistNodeIndexToLocation,
 } from '../src/core/coords.js';
 import {
@@ -48,13 +56,17 @@ test('app re-exports routing module symbols', () => {
 test('app re-exports coordinate module symbols', () => {
   assert.equal(appMapCanvasPixelToGraphMeters, mapCanvasPixelToGraphMeters);
   assert.equal(appMapClientPointToCanvasPixel, mapClientPointToCanvasPixel);
+  assert.equal(appParseModeValuesFromLocationSearch, parseModeValuesFromLocationSearch);
+  assert.equal(appPersistModeValuesToLocation, persistModeValuesToLocation);
+  assert.equal(appParseColourCycleMinutesFromLocationSearch, parseColourCycleMinutesFromLocationSearch);
+  assert.equal(appPersistColourCycleMinutesToLocation, persistColourCycleMinutesToLocation);
   assert.equal(appParseNodeIndexFromLocationSearch, parseNodeIndexFromLocationSearch);
   assert.equal(appPersistNodeIndexToLocation, persistNodeIndexToLocation);
 });
 
 test('app re-exports colour module symbols', () => {
   assert.equal(appTimeToColour, timeToColour);
-  assert.equal(DEFAULT_COLOUR_CYCLE_MINUTES, 60);
+  assert.equal(DEFAULT_COLOUR_CYCLE_MINUTES, 75);
   assert.ok(CYCLE_COLOUR_MAP_GLSL.includes('mapCycleColour'));
 });
 

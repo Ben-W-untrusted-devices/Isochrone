@@ -4,6 +4,14 @@ import {
   EDGE_MODE_CAR_BIT,
   EDGE_MODE_WALK_BIT,
 } from '../config/constants.js';
+import {
+  parseColourCycleMinutesFromLocationSearch,
+  parseModeValuesFromLocationSearch,
+  persistColourCycleMinutesToLocation,
+  persistModeValuesToLocation,
+} from '../core/coords.js';
+
+const CANONICAL_MODE_VALUES = ['walk', 'bike', 'car'];
 
 export function initializeAppShell(doc) {
   const resolvedDocument = doc ?? globalThis.document;
@@ -85,8 +93,19 @@ export function initializeAppShell(doc) {
   setLoadingProgressBar(loadingProgressBar, 0);
   routingStatus.textContent = 'Ready.';
   renderBackendBadge.textContent = 'Renderer: Detecting...';
-  for (const option of modeSelect.options) {
-    option.selected = option.value === 'car';
+  const locationSearch = globalThis.location?.search ?? '';
+  const persistedModeValues = parseModeValuesFromLocationSearch(locationSearch);
+  if (persistedModeValues !== null && persistedModeValues.length > 0) {
+    setSelectedModeValues(modeSelect, persistedModeValues);
+  } else {
+    setSelectedModeValues(modeSelect, ['car']);
+  }
+
+  const persistedCycleMinutes = parseColourCycleMinutesFromLocationSearch(locationSearch);
+  if (persistedCycleMinutes === null) {
+    colourCycleMinutesInput.value = String(DEFAULT_COLOUR_CYCLE_MINUTES);
+  } else {
+    colourCycleMinutesInput.value = String(persistedCycleMinutes);
   }
 
   return {
@@ -134,9 +153,7 @@ export function getAllowedModeMaskFromShell(shell) {
 
   if (allowedModeMask === 0) {
     if (shell.modeSelect) {
-      for (const option of shell.modeSelect.options) {
-        option.selected = option.value === 'car';
-      }
+      setSelectedModeValues(shell.modeSelect, ['car']);
     }
     return EDGE_MODE_CAR_BIT;
   }
@@ -180,15 +197,14 @@ export function bindModeSelectControl(shell, dependencies = {}) {
 
   const handleSelectChange = () => {
     getAllowedModeMaskFromShell(shell);
+    persistModeValuesToLocation(getSelectedModeValues(shell.modeSelect));
   };
   const handleCycleChange = () => {
     const cycleMinutes = getColourCycleMinutesFromShell(shell);
+    persistColourCycleMinutesToLocation(cycleMinutes);
     renderIsochroneLegendIfNeeded(shell, cycleMinutes);
   };
 
-  for (const option of shell.modeSelect.options) {
-    option.selected = option.value === 'car';
-  }
   getAllowedModeMaskFromShell(shell);
   getColourCycleMinutesFromShell(shell);
   renderIsochroneLegendIfNeeded(shell, getColourCycleMinutesFromShell(shell));
@@ -237,4 +253,21 @@ function clampInt(value, minValue, maxValue) {
     return maxValue;
   }
   return value;
+}
+
+function setSelectedModeValues(modeSelect, modeValues) {
+  const selectedModeSet = new Set(modeValues);
+  for (const option of modeSelect.options) {
+    option.selected = selectedModeSet.has(option.value);
+  }
+}
+
+function getSelectedModeValues(modeSelect) {
+  const selectedModeSet = new Set();
+  for (const option of modeSelect.options) {
+    if (option.selected && CANONICAL_MODE_VALUES.includes(option.value)) {
+      selectedModeSet.add(option.value);
+    }
+  }
+  return CANONICAL_MODE_VALUES.filter((modeValue) => selectedModeSet.has(modeValue));
 }

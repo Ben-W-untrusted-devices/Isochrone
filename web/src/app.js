@@ -51,7 +51,11 @@ export { createWalkingSearchState, computeEdgeTraversalCostSeconds } from './cor
 export {
   mapCanvasPixelToGraphMeters,
   mapClientPointToCanvasPixel,
+  parseColourCycleMinutesFromLocationSearch,
+  parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
+  persistColourCycleMinutesToLocation,
+  persistModeValuesToLocation,
   persistNodeIndexToLocation,
 } from './core/coords.js';
 export {

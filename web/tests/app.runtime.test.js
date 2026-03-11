@@ -9,8 +9,12 @@ import {
   createWalkingSearchState,
   findNearestNodeIndexForModeFromSpatialIndex,
   mapCanvasPixelToGraphMeters,
+  parseColourCycleMinutesFromLocationSearch,
   parseGraphBinary,
+  parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
+  persistColourCycleMinutesToLocation,
+  persistModeValuesToLocation,
   persistNodeIndexToLocation,
   precomputeNodeModeMask,
   precomputeNodePixelCoordinates,
@@ -269,5 +273,59 @@ test('persistNodeIndexToLocation rewrites URL when the node actually changes', (
 
   locationObject.href = 'https://example.test/map?foo=bar&node=9#viewport';
   const unchanged = persistNodeIndexToLocation(9, { locationObject, historyObject });
+  assert.equal(unchanged, false);
+});
+
+test('parseModeValuesFromLocationSearch normalizes and validates values', () => {
+  assert.deepEqual(parseModeValuesFromLocationSearch('?modes=car,bike'), ['bike', 'car']);
+  assert.deepEqual(parseModeValuesFromLocationSearch('?modes=walk,car,car'), ['walk', 'car']);
+  assert.equal(parseModeValuesFromLocationSearch('?modes=invalid'), null);
+  assert.equal(parseModeValuesFromLocationSearch(''), null);
+});
+
+test('persistModeValuesToLocation writes canonical mode query values', () => {
+  const locationObject = { href: 'https://example.test/map?foo=bar#viewport' };
+  let replacedUrl = null;
+  const historyObject = {
+    replaceState(_state, _title, url) {
+      replacedUrl = url;
+    },
+  };
+
+  const changed = persistModeValuesToLocation(['car', 'bike', 'car'], {
+    locationObject,
+    historyObject,
+  });
+  assert.equal(changed, true);
+  assert.equal(replacedUrl, '/map?foo=bar&modes=bike%2Ccar#viewport');
+
+  locationObject.href = 'https://example.test/map?foo=bar&modes=bike%2Ccar#viewport';
+  const unchanged = persistModeValuesToLocation(['bike', 'car'], { locationObject, historyObject });
+  assert.equal(unchanged, false);
+});
+
+test('parseColourCycleMinutesFromLocationSearch validates and clamps values', () => {
+  assert.equal(parseColourCycleMinutesFromLocationSearch('?cycle=75'), 75);
+  assert.equal(parseColourCycleMinutesFromLocationSearch('?cycle=1'), 5);
+  assert.equal(parseColourCycleMinutesFromLocationSearch('?cycle=9999'), 24 * 60);
+  assert.equal(parseColourCycleMinutesFromLocationSearch('?cycle=foo'), null);
+  assert.equal(parseColourCycleMinutesFromLocationSearch(''), null);
+});
+
+test('persistColourCycleMinutesToLocation writes cycle query value', () => {
+  const locationObject = { href: 'https://example.test/map?foo=bar#viewport' };
+  let replacedUrl = null;
+  const historyObject = {
+    replaceState(_state, _title, url) {
+      replacedUrl = url;
+    },
+  };
+
+  const changed = persistColourCycleMinutesToLocation(75, { locationObject, historyObject });
+  assert.equal(changed, true);
+  assert.equal(replacedUrl, '/map?foo=bar&cycle=75#viewport');
+
+  locationObject.href = 'https://example.test/map?foo=bar&cycle=75#viewport';
+  const unchanged = persistColourCycleMinutesToLocation(75, { locationObject, historyObject });
   assert.equal(unchanged, false);
 });
