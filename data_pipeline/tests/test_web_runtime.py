@@ -309,6 +309,15 @@ def test_app_js_paints_interpolated_edges_during_search_contract() -> None:
     assert "paintedEdgeCount," in app_js
 
 
+def test_app_js_reuses_eligible_outgoing_edge_iteration_contract() -> None:
+    app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
+
+    assert "function forEachEligibleOutgoingEdgeFromSourceNode(" in app_js
+    assert "if (typeof onEligibleEdge !== 'function') {" in app_js
+    assert app_js.count("return forEachEligibleOutgoingEdgeFromSourceNode(") >= 3
+    assert "const callbackContribution = onEligibleEdge(" in app_js
+
+
 def test_app_js_uses_isochrone_canvas_layer() -> None:
     app_js = (WEB_ROOT / "src" / "app.js").read_text(encoding="utf-8")
 

@@ -3011,19 +3011,19 @@ export function paintSettledBatchToGrid(pixelGrid, nodePixels, distSeconds, sett
   return paintedCount;
 }
 
-function paintEligibleOutgoingEdgesFromSourceNode(
-  pixelGrid,
+function forEachEligibleOutgoingEdgeFromSourceNode(
   graph,
   nodePixels,
   distSeconds,
   sourceNodeIndex,
   allowedModeMask,
-  alpha,
-  colourCycleMinutes,
   edgeSlackSeconds,
-  stepStride,
   edgeTraversalCostSeconds,
+  onEligibleEdge,
 ) {
+  if (typeof onEligibleEdge !== 'function') {
+    throw new Error('onEligibleEdge must be a function');
+  }
   if (sourceNodeIndex < 0 || sourceNodeIndex >= graph.header.nNodes) {
     return 0;
   }
@@ -3033,7 +3033,7 @@ function paintEligibleOutgoingEdgesFromSourceNode(
     return 0;
   }
 
-  let paintedCount = 0;
+  let totalContribution = 0;
   const x0 = nodePixels.nodePixelX[sourceNodeIndex];
   const y0 = nodePixels.nodePixelY[sourceNodeIndex];
   const firstEdgeIndex = graph.nodeU32[sourceNodeIndex * 4 + 2];
@@ -3072,19 +3072,57 @@ function paintEligibleOutgoingEdgesFromSourceNode(
 
     const x1 = nodePixels.nodePixelX[targetNodeIndex];
     const y1 = nodePixels.nodePixelY[targetNodeIndex];
-    paintedCount += paintInterpolatedEdgeToGrid(
-      pixelGrid,
+    const callbackContribution = onEligibleEdge(
       x0,
       y0,
       startSeconds,
       x1,
       y1,
       expectedTargetSeconds,
-      { alpha, colourCycleMinutes, stepStride },
+      targetNodeIndex,
+      edgeIndex,
     );
+    if (Number.isFinite(callbackContribution)) {
+      totalContribution += callbackContribution;
+    }
   }
 
-  return paintedCount;
+  return totalContribution;
+}
+
+function paintEligibleOutgoingEdgesFromSourceNode(
+  pixelGrid,
+  graph,
+  nodePixels,
+  distSeconds,
+  sourceNodeIndex,
+  allowedModeMask,
+  alpha,
+  colourCycleMinutes,
+  edgeSlackSeconds,
+  stepStride,
+  edgeTraversalCostSeconds,
+) {
+  return forEachEligibleOutgoingEdgeFromSourceNode(
+    graph,
+    nodePixels,
+    distSeconds,
+    sourceNodeIndex,
+    allowedModeMask,
+    edgeSlackSeconds,
+    edgeTraversalCostSeconds,
+    (x0, y0, startSeconds, x1, y1, expectedTargetSeconds) =>
+      paintInterpolatedEdgeToGrid(
+        pixelGrid,
+        x0,
+        y0,
+        startSeconds,
+        x1,
+        y1,
+        expectedTargetSeconds,
+        { alpha, colourCycleMinutes, stepStride },
+      ),
+  );
 }
 
 export function paintSettledBatchEdgeInterpolationsToGrid(
@@ -3231,67 +3269,26 @@ function paintEligibleOutgoingEdgesFromSourceNodeToTravelTimeGrid(
   stepStride,
   edgeTraversalCostSeconds,
 ) {
-  if (sourceNodeIndex < 0 || sourceNodeIndex >= graph.header.nNodes) {
-    return 0;
-  }
-
-  const startSeconds = distSeconds[sourceNodeIndex];
-  if (!Number.isFinite(startSeconds)) {
-    return 0;
-  }
-
-  let paintedCount = 0;
-  const x0 = nodePixels.nodePixelX[sourceNodeIndex];
-  const y0 = nodePixels.nodePixelY[sourceNodeIndex];
-  const firstEdgeIndex = graph.nodeU32[sourceNodeIndex * 4 + 2];
-  const edgeCount = graph.nodeU16[sourceNodeIndex * 8 + 6];
-  const endEdgeIndex = firstEdgeIndex + edgeCount;
-
-  for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
-    if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
-      continue;
-    }
-
-    const edgeCostSeconds = getEdgeTraversalCostSeconds(
-      graph,
-      edgeIndex,
-      allowedModeMask,
-      edgeTraversalCostSeconds,
-    );
-    if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
-      continue;
-    }
-
-    const targetNodeIndex = graph.edgeU32[edgeIndex * 3];
-    if (targetNodeIndex < 0 || targetNodeIndex >= graph.header.nNodes) {
-      continue;
-    }
-
-    const targetSeconds = distSeconds[targetNodeIndex];
-    if (!Number.isFinite(targetSeconds)) {
-      continue;
-    }
-
-    const expectedTargetSeconds = startSeconds + edgeCostSeconds;
-    if (expectedTargetSeconds > targetSeconds + edgeSlackSeconds) {
-      continue;
-    }
-
-    const x1 = nodePixels.nodePixelX[targetNodeIndex];
-    const y1 = nodePixels.nodePixelY[targetNodeIndex];
-    paintedCount += paintInterpolatedEdgeTravelTimesToGrid(
-      travelTimeGrid,
-      x0,
-      y0,
-      startSeconds,
-      x1,
-      y1,
-      expectedTargetSeconds,
-      { stepStride },
-    );
-  }
-
-  return paintedCount;
+  return forEachEligibleOutgoingEdgeFromSourceNode(
+    graph,
+    nodePixels,
+    distSeconds,
+    sourceNodeIndex,
+    allowedModeMask,
+    edgeSlackSeconds,
+    edgeTraversalCostSeconds,
+    (x0, y0, startSeconds, x1, y1, expectedTargetSeconds) =>
+      paintInterpolatedEdgeTravelTimesToGrid(
+        travelTimeGrid,
+        x0,
+        y0,
+        startSeconds,
+        x1,
+        y1,
+        expectedTargetSeconds,
+        { stepStride },
+      ),
+  );
 }
 
 export function paintSettledBatchEdgeInterpolationsToTravelTimeGrid(
@@ -3457,65 +3454,27 @@ function collectEligibleOutgoingTravelTimeEdgeVerticesFromSourceNode(
   edgeVertexBuilder,
   edgeTraversalCostSeconds,
 ) {
-  if (sourceNodeIndex < 0 || sourceNodeIndex >= graph.header.nNodes) {
-    return 0;
-  }
-
-  const startSeconds = distSeconds[sourceNodeIndex];
-  if (!Number.isFinite(startSeconds)) {
-    return 0;
-  }
-
-  let segmentCount = 0;
-  const x0 = nodePixels.nodePixelX[sourceNodeIndex];
-  const y0 = nodePixels.nodePixelY[sourceNodeIndex];
-  const firstEdgeIndex = graph.nodeU32[sourceNodeIndex * 4 + 2];
-  const edgeCount = graph.nodeU16[sourceNodeIndex * 8 + 6];
-  const endEdgeIndex = firstEdgeIndex + edgeCount;
-
-  for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
-    if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
-      continue;
-    }
-
-    const edgeCostSeconds = getEdgeTraversalCostSeconds(
-      graph,
-      edgeIndex,
-      allowedModeMask,
-      edgeTraversalCostSeconds,
-    );
-    if (!Number.isFinite(edgeCostSeconds) || edgeCostSeconds <= 0) {
-      continue;
-    }
-
-    const targetNodeIndex = graph.edgeU32[edgeIndex * 3];
-    if (targetNodeIndex < 0 || targetNodeIndex >= graph.header.nNodes) {
-      continue;
-    }
-
-    const targetSeconds = distSeconds[targetNodeIndex];
-    if (!Number.isFinite(targetSeconds)) {
-      continue;
-    }
-
-    const expectedTargetSeconds = startSeconds + edgeCostSeconds;
-    if (expectedTargetSeconds > targetSeconds + edgeSlackSeconds) {
-      continue;
-    }
-
-    appendEdgeVertexSegment(
-      edgeVertexBuilder,
-      x0,
-      y0,
-      startSeconds,
-      nodePixels.nodePixelX[targetNodeIndex],
-      nodePixels.nodePixelY[targetNodeIndex],
-      expectedTargetSeconds,
-    );
-    segmentCount += 1;
-  }
-
-  return segmentCount;
+  return forEachEligibleOutgoingEdgeFromSourceNode(
+    graph,
+    nodePixels,
+    distSeconds,
+    sourceNodeIndex,
+    allowedModeMask,
+    edgeSlackSeconds,
+    edgeTraversalCostSeconds,
+    (x0, y0, startSeconds, x1, y1, expectedTargetSeconds) => {
+      appendEdgeVertexSegment(
+        edgeVertexBuilder,
+        x0,
+        y0,
+        startSeconds,
+        x1,
+        y1,
+        expectedTargetSeconds,
+      );
+      return 1;
+    },
+  );
 }
 
 export function collectSettledBatchTravelTimeEdgeVertices(
