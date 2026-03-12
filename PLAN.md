@@ -698,108 +698,99 @@ Benchmark note (2026-03-11):
 
 ---
 
-# Phase 11 — Post-MVP: GTFS Transit Integration
+# Phase 11 — Post-MVP: Global Public Transit Data Pipeline
 
-*This phase is explicitly deferred from MVP. The binary format, routing stubs, and stop-attachment flags in the graph are designed to accept transit data without schema changes. The system is designed for any GTFS feed, for any region.*
+*This phase is explicitly deferred from MVP. Goal: support public transport data ingestion and routing for any region, not just Berlin/Germany, by separating source formats from a canonical routing format.*
 
-## 11.1 Obtain GTFS feed
-Estimated time: variable (not included in total)
-
-Tasks
-- Register at feed provider (e.g. BVG OpenData for Berlin, or any GTFS-publishing agency)
-- Verify licence permits redistribution in a compiled binary (if not, the graph must be served from an authenticated endpoint rather than a public repo)
-- Download and unzip GTFS bundle (`.zip` containing `stops.txt`, `trips.txt`, `stop_times.txt`, `calendar.txt`, `calendar_dates.txt`, `routes.txt`)
-
----
-
-## 11.2 Parse and filter GTFS stops
+## 11.1 Define feed registry and region config
 Estimated time: 45 min
 
-### 11.2.1 Load stops.txt
-Estimated time: 20 min
-
 Tasks
-- Parse CSV; project stop (lat, lon) → UTM using same projection as walking graph
-- Discard stops outside the walking graph bounding box
-
-### 11.2.2 Link stops to nearest walking nodes
-Estimated time: 25 min
-
-Tasks
-- Build k-d tree over walking nodes (use `scipy.spatial.KDTree` in Python pipeline)
-- For each stop: find nearest walking node within 200 m; flag it `is_stop_attachment`
-- Discard stops with no walking node within 200 m
+- [ ] Add a feed registry file (`docs/transit_feed_registry.md` or JSON) with per-region metadata: provider, licence URL, update cadence, timezone, and feed format.
+- [ ] Add pipeline config inputs (`--region`, `--transit-feed`, `--transit-format`) so the same scripts run for any city/country.
+- [ ] Define licence gate rules (allowed for local processing, allowed for redistribution, attribution requirements) and fail export when redistribution is disallowed.
 
 ---
 
-## 11.3 Parse GTFS schedules
-Estimated time: 1 hour 30 min
+## 11.2 Source adapters (raw formats)
+Estimated time: 3 hours
 
-### 11.3.1 Load calendar and calendar_dates
-Estimated time: 30 min
-
-Tasks
-- Parse `calendar.txt` → service_id → day-of-week bitmask
-- Parse `calendar_dates.txt` → apply additions/removals to each service
-- Output: `service_day_mask[service_id]` (uint8, bits 0–6 = Mon–Sun)
-
-### 11.3.2 Load trips and routes
-Estimated time: 20 min
+### 11.2.1 GTFS static adapter
+Estimated time: 1 hour 15 min
 
 Tasks
-- Parse `trips.txt` → `trip_id → {route_id, service_id}`
-- Parse `routes.txt` → `route_id → transport_type`
+- [ ] Parse `stops.txt`, `trips.txt`, `stop_times.txt`, `calendar.txt`, `calendar_dates.txt`, `routes.txt`, `agency.txt`.
+- [ ] Normalize timezone/day rollover semantics (`25:10:00`, etc.) into service-day-relative seconds.
+- [ ] Keep raw identifiers for traceability while emitting normalized numeric IDs.
 
-### 11.3.3 Parse stop_times and build connection list
-Estimated time: 40 min
-
-Tasks
-- Parse `stop_times.txt` → for each trip, sorted stop sequence with departure times
-- Emit one transit edge per consecutive stop pair per trip: `{from_stop, to_stop, departure_seconds, travel_seconds, route_id, service_day_mask}`
-- Sort all transit edges by `departure_seconds` (required for CSA)
-
----
-
-## 11.4 Export augmented binary graph
-Estimated time: 30 min
+### 11.2.2 GTFS-Realtime adapter (optional overlay)
+Estimated time: 45 min
 
 Tasks
-- Re-run Phase 4 export with `N_stops > 0`, `N_tedges > 0`, `flags` bit 0 = 1
-- Verify graph file size (expect 50–150 MB uncompressed for Berlin BVG+DB; compress to ~30–70 MB)
+- [ ] Parse TripUpdates/VehiclePositions/ServiceAlerts (when available) as a delta layer over static schedules.
+- [ ] Store delay/cancellation updates in a separate overlay artifact so static baseline remains cacheable.
 
----
-
-## 11.5 Implement CSA transit routing
-Estimated time: 2 hours 30 min
-
-### 11.5.1 Load transit tables in JS
-Estimated time: 20 min
-
-Tasks
-- Map stop and transit edge TypedArrays (already specified in Phase 5.3.2; they just return empty views in MVP)
-
-### 11.5.2 Implement Connection Scan Algorithm
+### 11.2.3 NeTEx/SIRI adapter scaffold
 Estimated time: 1 hour
 
 Tasks
-- Input: earliest arrival time at each stop reachable by walking (from Phase 8.2 output)
-- Scan transit edges in departure-time order; for each edge, if `T_arrival_at_from_stop + transfer_penalty ≤ departure_time`, update `T_arrival[to_stop]`
-- Transfer penalty: 3 min (180 s) default, configurable
-- Output: `T_arrival[stop_index]` for all reachable stops
+- [ ] Add adapter interface with deterministic output contract identical to GTFS adapter output.
+- [ ] Implement minimal NeTEx import path for stop places, routes, journey patterns, and timetables.
+- [ ] Implement minimal SIRI realtime mapping to the same delay/cancellation overlay schema as GTFS-RT.
 
-### 11.5.3 Multi-source Dijkstra from transit-reached stops
-Estimated time: 30 min
+---
 
-Tasks
-- Seed Dijkstra with all stops where `T_arrival[stop] < Infinity`; initial cost = `T_arrival[stop]`
-- Re-run walking Dijkstra; merge with existing walking-only distances (take minimum)
-
-### 11.5.4 Integrate day-of-week filtering
-Estimated time: 40 min
+## 11.3 Canonical internal transit model (useful processing format)
+Estimated time: 2 hours
 
 Tasks
-- Time-of-day input (Phase 9.3) is extended to include a day-of-week selector
-- Filter transit edges to those whose `service_day_mask` includes the selected day
+- [ ] Define canonical tables independent of source format: `stops`, `routes`, `trips`, `connections`, `services`, `transfers`, `agencies`.
+- [ ] Define canonical units/types: projected meters for geometry, seconds for times, bitmasks/bitsets for service days, integer IDs for joins.
+- [ ] Define walking-graph linkage table: `stop_id -> nearest_node_index`, `walk_attach_cost_seconds`, `attach_distance_m`.
+- [ ] Persist canonical intermediate artifacts as deterministic JSON/Parquet snapshots for debugging and repeatable builds.
+
+---
+
+## 11.4 Validation and quality gates
+Estimated time: 1 hour 30 min
+
+Tasks
+- [ ] Validate schedule monotonicity (`arrival/departure` non-decreasing along each trip).
+- [ ] Validate spatial linkage (stop attachment distance thresholds and coverage statistics).
+- [ ] Validate referential integrity across all tables (`trip -> route/service`, `connection -> stops/trip`).
+- [ ] Emit per-region QA summary: stop count, attached-stop %, connection count, service-day coverage, dropped-record reasons.
+
+---
+
+## 11.5 Build routing-optimized transit structures
+Estimated time: 2 hours
+
+Tasks
+- [ ] Generate CSA-ready `connections` sorted by departure time, with packed columns tuned for sequential scan.
+- [ ] Materialize transfer edges/penalties for stop-to-stop interchange and stop-to-walk-node transfers.
+- [ ] Build service-day indexing (day masks and date exceptions) for fast query-time filtering.
+- [ ] Export deterministic binary transit tables and wire into graph header flags/versioning.
+
+---
+
+## 11.6 Runtime integration in web router
+Estimated time: 2 hours
+
+Tasks
+- [ ] Load transit tables in JS alongside existing road graph tables.
+- [ ] Implement CSA pass using walking-reachable stops as seeds, then merge back into road Dijkstra via multi-source seeding.
+- [ ] Add query controls for departure time/day and transit enable/disable.
+- [ ] Handle missing transit tables gracefully (road-only fallback without console noise).
+
+---
+
+## 11.7 Multi-region onboarding process
+Estimated time: 1 hour
+
+Tasks
+- [ ] Document repeatable onboarding steps for a new region: discover feed, validate licence, run adapters, run QA, export artifacts.
+- [ ] Add one non-Berlin fixture dataset in tests to ensure region-agnostic behavior.
+- [ ] Add per-region attribution templating so required legal text is emitted in UI/export outputs.
 
 ---
 
@@ -855,7 +846,7 @@ Tasks
 Web Workers are **not planned** at any phase. The routing loop is time-sliced via `requestAnimationFrame` (Phase 7.2), which gives adequate UI responsiveness without the complexity of cross-thread `ArrayBuffer` transfer, Worker lifecycle management, or the risk of needing `SharedArrayBuffer` (which requires specific COOP/COEP HTTP headers). If profiling after Phase 8 reveals that even 8 ms slices cause dropped frames (unlikely on a modern device for a 30-min isochrone), a Worker can be added then — but there is no basis for scheduling that work now.
 
 ## On future region support
-The pipeline is parameterised from Phase 3.2 onward: `--epsg`, `--input`, `--output` flags on all pipeline scripts. The binary header stores the EPSG code so the JS client knows which projection was used. To build a graph for any other city, the operator provides an Overpass query (or equivalent OSM JSON extract) and optionally a GTFS `.zip`, then runs the pipeline. No code changes are needed for regions using any UTM zone or national grid projection supported by `pyproj`.
+The pipeline is parameterised from Phase 3.2 onward: `--epsg`, `--input`, `--output` flags on all pipeline scripts. The binary header stores the EPSG code so the JS client knows which projection was used. To build a graph for any other city, the operator provides an Overpass query (or equivalent OSM JSON extract) and optionally a transit feed (GTFS static/GTFS-RT first, with NeTEx/SIRI adapters planned in Phase 11), then runs the pipeline. No code changes are needed for regions using any UTM zone or national grid projection supported by `pyproj`.
 
 ---
 
@@ -876,11 +867,11 @@ The pipeline is parameterised from Phase 3.2 onward: `--epsg`, `--input`, `--out
 
 **MVP total: ~21 hours for a junior developer**
 
-Post-MVP adds approximately **11.5–13.5 hours** of development:
+Post-MVP adds approximately **22–24 hours** of development:
 - [ ] Phase 10.4 (multimodal road schema + extraction): ~4.5 hours
-- [ ] Phase 11 (GTFS transit): ~7–9 hours
+- [ ] Phase 11 (global public transit pipeline): ~12.25 hours
 - [ ] Phase 12 (UX and sharing enhancements): ~5.5 hours
-- [ ] Plus variable time to obtain and verify GTFS licence terms.
+- [ ] Plus variable time to obtain/validate feed licences and feed-specific integration constraints.
 
 ---
 
@@ -898,8 +889,9 @@ Post-MVP adds approximately **11.5–13.5 hours** of development:
 ## Post-MVP additions
 - `berlin_graph.bin.gz` schema v2 with per-edge mode mask + speed metadata (bike/car/walk support)
 - Pipeline summaries for speed/access coverage and mode-specific edge counts
-- Augmented `berlin_graph.bin.gz` with transit tables populated
-- `/web/src/csa.js` — Connection Scan Algorithm module
+- Canonical transit snapshots (`stops/routes/trips/connections/services/transfers`) independent of source format
+- Transit-enabled graph export with populated stop/connection tables
+- CSA runtime module and source-adapter pipeline (`GTFS`, `GTFS-RT`, `NeTEx`, `SIRI` scaffold)
 
 ---
 
