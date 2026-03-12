@@ -264,7 +264,8 @@ test('renderIsochroneLegendIfNeeded renders print-safe swatches and caches by th
   const firstRender = renderIsochroneLegendIfNeeded(shell, 75, { theme: 'light' });
   assert.equal(firstRender, true);
   assert.ok(shell.isochroneLegend.innerHTML.includes('--legend-swatch-colour: rgb(0, 110, 210)'));
-  assert.ok(shell.isochroneLegend.innerHTML.includes('>■<'));
+  assert.ok(shell.isochroneLegend.innerHTML.includes('class="legend-swatch"'));
+  assert.ok(!shell.isochroneLegend.innerHTML.includes('>■<'));
 
   const cachedRender = renderIsochroneLegendIfNeeded(shell, 75, { theme: 'light' });
   assert.equal(cachedRender, false);

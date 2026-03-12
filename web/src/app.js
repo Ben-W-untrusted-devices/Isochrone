@@ -1119,7 +1119,7 @@ export function renderIsochroneLegend(shell, cycleMinutes, options = {}) {
     const rangeLabel = `${formatLegendDuration(rangeStartMinutes)}-${formatLegendDuration(rangeEndMinutes)}`;
 
     legendRows.push(
-      `<div class="legend-row"><span class="legend-swatch" style="--legend-swatch-colour: rgb(${colour[0]}, ${colour[1]}, ${colour[2]});" aria-hidden="true">■</span><span>${rangeLabel}</span></div>`,
+      `<div class="legend-row"><span class="legend-swatch" style="--legend-swatch-colour: rgb(${colour[0]}, ${colour[1]}, ${colour[2]});" aria-hidden="true"></span><span>${rangeLabel}</span></div>`,
     );
   }
   legendRows.push(
