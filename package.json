@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "lint:js": "eslint web/src web/tests",
-    "test:js": "node --test web/tests"
+    "test:js": "node --test web/tests",
+    "bench:routing": "node web/scripts/benchmark-routing.mjs",
+    "wasm:build": "./wasm/build-routing-kernel.sh"
   },
   "devDependencies": {
     "@eslint/js": "^9.22.0",

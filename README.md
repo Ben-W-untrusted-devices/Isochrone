@@ -19,6 +19,31 @@ make test
 make review
 ```
 
+## Headless routing benchmark
+
+```bash
+npm run --silent bench:routing -- \
+  --graph data_pipeline/output/graph-walk.bin \
+  --samples 24 \
+  --modes walk,bike,car,all \
+  --heap-strategies decrease-key,duplicate-push \
+  --output-json data_pipeline/output/routing-benchmark.json
+```
+
+- Uses deterministic random source-node sampling (`--seed`, default `1337`).
+- Runs routing headlessly in Node to isolate CPU/search behavior from browser rendering.
+- Reports per-mode/per-heap wall-time and CPU-time summaries.
+
+## WASM groundwork
+
+```bash
+make wasm-build
+```
+
+- Builds Rust routing-kernel crate to `web/wasm/routing-kernel.wasm`.
+- Current runtime remains JS-only; this is setup for A/B benchmarking and staged migration.
+- Interface and milestones are documented in `docs/wasm-routing-kernel.md`.
+
 ## Runtime data
 - Web runtime loads `data_pipeline/output/graph-walk.bin.gz` by default.
 - The graph payload is gzip-compressed and decompressed in-browser before parsing.

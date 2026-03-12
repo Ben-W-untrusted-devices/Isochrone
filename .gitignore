@@ -24,3 +24,5 @@ web/dist/
 # Build artifacts and logs
 *.log
 .cache/
+target/
+web/wasm/*.wasm

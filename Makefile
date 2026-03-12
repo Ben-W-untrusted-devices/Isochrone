@@ -8,7 +8,7 @@ PYTEST ?= $(VENV_BIN)/pytest
 NPM ?= npm
 PRE_COMMIT_HOME ?= .cache/pre-commit
 
-.PHONY: bootstrap bootstrap-python bootstrap-js precommit-install format lint lint-js test review check build clean
+.PHONY: bootstrap bootstrap-python bootstrap-js precommit-install format lint lint-js test review check build wasm-build clean
 
 bootstrap: bootstrap-python bootstrap-js
 
@@ -53,6 +53,9 @@ check: lint test
 
 build:
 	@echo "No build step: web app runs as vanilla ES modules."
+
+wasm-build:
+	./wasm/build-routing-kernel.sh
 
 clean:
 	rm -rf .pytest_cache .mypy_cache .ruff_cache data_pipeline/.pytest_cache
