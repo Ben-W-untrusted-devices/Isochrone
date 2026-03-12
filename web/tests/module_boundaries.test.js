@@ -36,6 +36,7 @@ import {
   persistNodeIndexToLocation,
 } from '../src/core/coords.js';
 import {
+  bindThemeControl,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
   initializeAppShell,
@@ -84,6 +85,7 @@ test('ui/input orchestration modules export expected entrypoints', async () => {
   const app = await import('../src/app.js');
 
   assert.equal(typeof initializeAppShell, 'function');
+  assert.equal(typeof bindThemeControl, 'function');
   assert.equal(typeof getAllowedModeMaskFromShell, 'function');
   assert.equal(typeof getColourCycleMinutesFromShell, 'function');
   assert.equal(typeof bindCanvasClickRouting, 'function');
@@ -94,6 +96,7 @@ test('ui/input orchestration modules export expected entrypoints', async () => {
 
   // Pure shell helpers are direct re-exports from app.js after split.
   assert.equal(app.initializeAppShell, initializeAppShell);
+  assert.equal(typeof app.bindThemeControl, 'function');
   assert.equal(app.getAllowedModeMaskFromShell, getAllowedModeMaskFromShell);
   assert.equal(app.getColourCycleMinutesFromShell, getColourCycleMinutesFromShell);
   assert.equal(typeof app.bindCanvasClickRouting, 'function');

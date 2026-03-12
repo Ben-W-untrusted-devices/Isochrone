@@ -12,6 +12,8 @@ import {
 } from '../core/coords.js';
 
 const CANONICAL_MODE_VALUES = ['walk', 'bike', 'car'];
+const CANONICAL_THEME_VALUES = ['light', 'dark'];
+const THEME_STORAGE_KEY = 'isochrone-theme';
 
 export function initializeAppShell(doc) {
   const resolvedDocument = doc ?? globalThis.document;
@@ -30,6 +32,7 @@ export function initializeAppShell(doc) {
   const routingStatus = resolvedDocument.getElementById('routing-status');
   const renderBackendBadge = resolvedDocument.getElementById('render-backend-badge');
   const routingDisclaimer = resolvedDocument.getElementById('routing-disclaimer');
+  const themeSelect = resolvedDocument.getElementById('theme-select');
   const modeSelect = resolvedDocument.getElementById('mode-select');
   const colourCycleMinutesInput = resolvedDocument.getElementById('colour-cycle-minutes');
   const exportSvgButton = resolvedDocument.getElementById('export-svg-button');
@@ -67,6 +70,9 @@ export function initializeAppShell(doc) {
   }
   if (!routingDisclaimer || routingDisclaimer.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="routing-disclaimer">');
+  }
+  if (!themeSelect || themeSelect.tagName !== 'SELECT') {
+    throw new Error('index.html is missing <select id="theme-select">');
   }
   if (!modeSelect || modeSelect.tagName !== 'SELECT') {
     throw new Error('index.html is missing <select id="mode-select">');
@@ -129,6 +135,7 @@ export function initializeAppShell(doc) {
     routingStatus,
     renderBackendBadge,
     routingDisclaimer,
+    themeSelect,
     modeSelect,
     colourCycleMinutesInput,
     exportSvgButton,
@@ -138,6 +145,46 @@ export function initializeAppShell(doc) {
     isochroneLegend,
     loadingFadeTimeoutId: null,
     lastRenderedLegendCycleMinutes: null,
+  };
+}
+
+export function bindThemeControl(shell, options = {}) {
+  if (!shell || typeof shell !== 'object' || !shell.themeSelect) {
+    throw new Error('shell.themeSelect is required');
+  }
+
+  const rootElement = options.rootElement ?? globalThis.document?.documentElement ?? null;
+  if (!rootElement || typeof rootElement !== 'object' || typeof rootElement.dataset !== 'object') {
+    throw new Error('rootElement with dataset is required');
+  }
+  const storage = options.storage ?? globalThis.localStorage ?? null;
+  const storageKey = options.storageKey ?? THEME_STORAGE_KEY;
+  if (typeof storageKey !== 'string' || storageKey.length === 0) {
+    throw new Error('storageKey must be a non-empty string');
+  }
+
+  const setTheme = (themeValue, persist = true) => {
+    const normalizedTheme = normalizeThemeValue(themeValue, normalizeThemeValue(shell.themeSelect.value));
+    shell.themeSelect.value = normalizedTheme;
+    rootElement.dataset.theme = normalizedTheme;
+    if (persist) {
+      safeStorageSet(storage, storageKey, normalizedTheme);
+    }
+    return normalizedTheme;
+  };
+
+  const persistedTheme = safeStorageGet(storage, storageKey);
+  setTheme(persistedTheme, false);
+
+  const handleThemeChange = () => {
+    setTheme(shell.themeSelect.value, true);
+  };
+  shell.themeSelect.addEventListener('change', handleThemeChange);
+
+  return {
+    dispose() {
+      shell.themeSelect.removeEventListener('change', handleThemeChange);
+    },
   };
 }
 
@@ -275,6 +322,38 @@ function sizeCanvasToCssPixels(canvas) {
 function setLoadingProgressBar(progressBar, progressPercent) {
   const clamped = clampInt(Math.round(progressPercent), 0, 100);
   progressBar.style.width = `${clamped}%`;
+}
+
+function normalizeThemeValue(themeValue, fallbackTheme = 'light') {
+  if (CANONICAL_THEME_VALUES.includes(themeValue)) {
+    return themeValue;
+  }
+  if (CANONICAL_THEME_VALUES.includes(fallbackTheme)) {
+    return fallbackTheme;
+  }
+  return 'light';
+}
+
+function safeStorageGet(storage, key) {
+  if (!storage || typeof storage.getItem !== 'function') {
+    return null;
+  }
+  try {
+    return storage.getItem(key);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function safeStorageSet(storage, key, value) {
+  if (!storage || typeof storage.setItem !== 'function') {
+    return;
+  }
+  try {
+    storage.setItem(key, value);
+  } catch (_error) {
+    // Ignore storage write failures (for example private browsing restrictions).
+  }
 }
 
 function clampInt(value, minValue, maxValue) {

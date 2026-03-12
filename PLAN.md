@@ -822,8 +822,8 @@ Decision note: use equal-width segmentation across the cycle (five 20% bands) fo
 Estimated time: 1 hour
 
 Tasks
-- [ ] Add light mode / dark mode support
-- [ ] Persist user theme preference locally and restore on load
+- [x] Add light mode / dark mode support
+- [x] Persist user theme preference locally and restore on load
 
 ## 12.3 Export rendered result to SVG
 Estimated time: 2 hours

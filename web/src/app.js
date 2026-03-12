@@ -29,6 +29,7 @@ import {
   persistNodeIndexToLocation,
 } from './core/coords.js';
 import {
+  bindThemeControl as bindThemeControlInternal,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
   initializeAppShell,
@@ -428,6 +429,10 @@ export function bindModeSelectControl(shell, options = {}) {
     renderIsochroneLegendIfNeeded,
     requestIsochroneRedraw: options.requestIsochroneRedraw,
   });
+}
+
+export function bindThemeControl(shell, options = {}) {
+  return bindThemeControlInternal(shell, options);
 }
 
 export function parseBoundaryBasemapPayload(payload) {
@@ -3511,6 +3516,7 @@ function isClosedPath(path) {
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', () => {
     const shell = initializeAppShell(globalThis.document);
+    bindThemeControl(shell);
     let initializedMapData = null;
     bindSvgExportControl(shell, {
       async exportCurrentRenderedIsochroneSvg() {

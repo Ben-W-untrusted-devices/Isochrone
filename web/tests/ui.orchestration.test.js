@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { bindModeSelectControl } from '../src/ui/orchestration.js';
+import { bindModeSelectControl, bindThemeControl } from '../src/ui/orchestration.js';
 
 function createEventTarget() {
   const listeners = new Map();
@@ -53,6 +53,14 @@ function createInput(initialValue = '75') {
   };
 }
 
+function createThemeSelect(initialValue = 'light') {
+  const eventTarget = createEventTarget();
+  return {
+    ...eventTarget,
+    value: initialValue,
+  };
+}
+
 test('bindModeSelectControl requests isochrone redraw on mode and cycle changes', () => {
   const modeSelect = createModeSelect(['car']);
   const colourCycleMinutesInput = createInput('75');
@@ -92,4 +100,35 @@ test('bindModeSelectControl requests isochrone redraw on mode and cycle changes'
   colourCycleMinutesInput.emit('change');
   assert.equal(redrawRequestCount, 2);
   assert.equal(legendRenderCount, 2);
+});
+
+test('bindThemeControl restores persisted theme and persists changes', () => {
+  const themeSelect = createThemeSelect('light');
+  const shell = { themeSelect };
+  const rootElement = { dataset: {} };
+  let storedValue = 'dark';
+  const storage = {
+    getItem(key) {
+      assert.equal(key, 'isochrone-theme');
+      return storedValue;
+    },
+    setItem(key, value) {
+      assert.equal(key, 'isochrone-theme');
+      storedValue = value;
+    },
+  };
+
+  const binding = bindThemeControl(shell, { rootElement, storage });
+  assert.equal(themeSelect.value, 'dark');
+  assert.equal(rootElement.dataset.theme, 'dark');
+
+  themeSelect.value = 'light';
+  themeSelect.emit('change');
+  assert.equal(rootElement.dataset.theme, 'light');
+  assert.equal(storedValue, 'light');
+
+  binding.dispose();
+  themeSelect.value = 'dark';
+  themeSelect.emit('change');
+  assert.equal(rootElement.dataset.theme, 'light');
 });
