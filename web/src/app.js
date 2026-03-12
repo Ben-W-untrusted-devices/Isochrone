@@ -396,6 +396,116 @@ export async function runWalkingIsochroneFromSourceNode(
   return runSummary;
 }
 
+function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
+  if (!shell || typeof shell !== 'object' || !shell.isochroneCanvas) {
+    return false;
+  }
+  if (!mapData || typeof mapData !== 'object' || !mapData.graph || !mapData.nodePixels) {
+    return false;
+  }
+
+  const snapshot = options.snapshot ?? mapData.lastRoutingSnapshot ?? null;
+  if (!snapshot || !(snapshot.distSeconds instanceof Float64Array)) {
+    return false;
+  }
+  if (snapshot.distSeconds.length < mapData.graph.header.nNodes) {
+    return false;
+  }
+
+  const colourCycleMinutes = options.colourCycleMinutes
+    ?? snapshot.colourCycleMinutes
+    ?? DEFAULT_COLOUR_CYCLE_MINUTES;
+  const colourTheme = normalizeIsochroneTheme(
+    options.colourTheme ?? resolveIsochroneTheme(),
+    'dark',
+  );
+  const allowedModeMask = options.allowedModeMask ?? snapshot.allowedModeMask ?? EDGE_MODE_CAR_BIT;
+  const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
+    snapshot.edgeTraversalCostSeconds,
+    mapData.graph.header.nEdges,
+  );
+
+  const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
+  updateRenderBackendBadge(shell, renderer);
+  const supportsGpuEdgeInterpolation = typeof renderer.drawTravelTimeEdges === 'function';
+  const supportsGpuTravelTimeRendering = typeof renderer.drawTravelTimeGrid === 'function';
+
+  if (supportsGpuEdgeInterpolation) {
+    const allEdgeVertices = collectAllReachableTravelTimeEdgeVertices(
+      mapData.graph,
+      mapData.nodePixels,
+      snapshot.distSeconds,
+      allowedModeMask,
+      { edgeTraversalCostSeconds },
+    );
+    renderer.drawTravelTimeEdges(allEdgeVertices, {
+      cycleMinutes: colourCycleMinutes,
+      colourTheme,
+      append: false,
+      widthPx: mapData.graph.header.gridWidthPx,
+      heightPx: mapData.graph.header.gridHeightPx,
+    });
+    return true;
+  }
+
+  if (supportsGpuTravelTimeRendering && mapData.travelTimeGrid) {
+    clearTravelTimeGrid(mapData.travelTimeGrid);
+    paintAllReachableEdgeInterpolationsToTravelTimeGrid(
+      mapData.travelTimeGrid,
+      mapData.graph,
+      mapData.nodePixels,
+      snapshot.distSeconds,
+      allowedModeMask,
+      {
+        stepStride: FINAL_EDGE_INTERPOLATION_STEP_STRIDE,
+        edgeTraversalCostSeconds,
+      },
+    );
+    paintReachableNodesTravelTimesToGrid(
+      mapData.travelTimeGrid,
+      mapData.nodePixels,
+      snapshot.distSeconds,
+    );
+    renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
+      cycleMinutes: colourCycleMinutes,
+      colourTheme,
+    });
+    return true;
+  }
+
+  if (mapData.pixelGrid) {
+    clearGrid(mapData.pixelGrid);
+    paintAllReachableEdgeInterpolationsToGrid(
+      mapData.pixelGrid,
+      mapData.graph,
+      mapData.nodePixels,
+      snapshot.distSeconds,
+      allowedModeMask,
+      {
+        alpha: 255,
+        colourCycleMinutes,
+        colourTheme,
+        stepStride: FINAL_EDGE_INTERPOLATION_STEP_STRIDE,
+        edgeTraversalCostSeconds,
+      },
+    );
+    paintReachableNodesToGrid(
+      mapData.pixelGrid,
+      mapData.nodePixels,
+      snapshot.distSeconds,
+      {
+        alpha: 255,
+        colourCycleMinutes,
+        colourTheme,
+      },
+    );
+    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+    return true;
+  }
+
+  return false;
+}
+
 export function runPostMvpTransitStub(graph, walkingSearchState) {
   validateGraphForRouting(graph);
 
@@ -1009,7 +1119,7 @@ export function renderIsochroneLegend(shell, cycleMinutes, options = {}) {
     const rangeLabel = `${formatLegendDuration(rangeStartMinutes)}-${formatLegendDuration(rangeEndMinutes)}`;
 
     legendRows.push(
-      `<div class="legend-row"><span class="legend-swatch" style="background: rgb(${colour[0]}, ${colour[1]}, ${colour[2]});"></span><span>${rangeLabel}</span></div>`,
+      `<div class="legend-row"><span class="legend-swatch" style="--legend-swatch-colour: rgb(${colour[0]}, ${colour[1]}, ${colour[2]});" aria-hidden="true">■</span><span>${rangeLabel}</span></div>`,
     );
   }
   legendRows.push(
@@ -3611,11 +3721,22 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         }
         const cycleMinutes = getColourCycleMinutesFromShell(shell);
         renderIsochroneLegendIfNeeded(shell, cycleMinutes, { theme: themeValue });
-        routingBinding?.requestIsochroneRedraw();
+        const rerendered = rerenderIsochroneFromSnapshot(shell, initializedMapData, {
+          colourTheme: themeValue,
+          colourCycleMinutes: cycleMinutes,
+        });
+        if (!rerendered) {
+          routingBinding?.requestIsochroneRedraw();
+        }
       },
     });
     let printRestoreTheme = null;
-    window.addEventListener('beforeprint', () => {
+    let isPrintOverrideActive = false;
+    const enterPrintMode = () => {
+      if (isPrintOverrideActive) {
+        return;
+      }
+      isPrintOverrideActive = true;
       const currentTheme = resolveIsochroneTheme();
       if (currentTheme === 'light') {
         return;
@@ -3624,14 +3745,35 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         printRestoreTheme = currentTheme;
       }
       themeBinding.setTheme('light', { persist: false, notify: true });
-    });
-    window.addEventListener('afterprint', () => {
+    };
+    const exitPrintMode = () => {
+      if (!isPrintOverrideActive) {
+        return;
+      }
+      isPrintOverrideActive = false;
       if (!printRestoreTheme) {
         return;
       }
       themeBinding.setTheme(printRestoreTheme, { persist: false, notify: true });
       printRestoreTheme = null;
-    });
+    };
+    window.addEventListener('beforeprint', enterPrintMode);
+    window.addEventListener('afterprint', exitPrintMode);
+    const printMediaQuery = typeof window.matchMedia === 'function' ? window.matchMedia('print') : null;
+    const handlePrintMediaChange = (event) => {
+      if (event.matches) {
+        enterPrintMode();
+      } else {
+        exitPrintMode();
+      }
+    };
+    if (printMediaQuery) {
+      if (typeof printMediaQuery.addEventListener === 'function') {
+        printMediaQuery.addEventListener('change', handlePrintMediaChange);
+      } else if (typeof printMediaQuery.addListener === 'function') {
+        printMediaQuery.addListener(handlePrintMediaChange);
+      }
+    }
     bindSvgExportControl(shell, {
       async exportCurrentRenderedIsochroneSvg() {
         if (routingBinding && typeof routingBinding.waitForIdle === 'function') {

@@ -230,7 +230,15 @@ body {
   height: 0.9rem;
   border-radius: 0.2rem;
   border: 1px solid rgba(200, 220, 235, 0.35);
+  background: var(--legend-swatch-colour, transparent);
+  color: transparent;
+  font-size: 0.82rem;
+  line-height: 0.9rem;
+  text-align: center;
+  font-weight: 700;
   flex: 0 0 auto;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 
 .legend-note {
@@ -403,5 +411,34 @@ body {
 
   #loading {
     display: none !important;
+  }
+
+  #theme-select,
+  #mode-select,
+  #colour-cycle-minutes,
+  #departure-time,
+  #export-svg-button {
+    color: #16344a !important;
+    background: #ffffff !important;
+    border-color: #9eb0bf !important;
+    -webkit-text-fill-color: #16344a;
+  }
+
+  #mode-select option,
+  #theme-select option {
+    color: #16344a !important;
+    background: #ffffff !important;
+  }
+
+  #mode-select option:checked,
+  #theme-select option:checked {
+    color: #16344a !important;
+    background: #ffffff !important;
+  }
+
+  .legend-swatch {
+    background: transparent !important;
+    color: var(--legend-swatch-colour, #173750) !important;
+    border-color: var(--legend-swatch-colour, #173750) !important;
   }
 }
