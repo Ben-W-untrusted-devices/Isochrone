@@ -17,10 +17,10 @@ import {
   SUPPORTED_GRAPH_VERSIONS,
 } from './config/constants.js';
 import {
-  createWalkingSearchState,
   getEdgeTraversalCostSeconds,
   getOrCreateEdgeTraversalCostSecondsCache,
   nodeHasAllowedModeOutgoingEdge,
+  precomputeEdgeTraversalCostSecondsCache,
 } from './core/routing.js';
 import {
   mapCanvasPixelToGraphMeters,
@@ -90,6 +90,9 @@ export {
   formatIsochroneExportTitle,
 } from './export/svg.js';
 export { timeToColour } from './render/colour.js';
+
+export const WASM_REQUIRED_MESSAGE =
+  'Your browser does not support WASM, this app requires WASM for performance reasons';
 export function precomputeNodeModeMask(graph) {
   validateGraphForRouting(graph);
 
@@ -113,6 +116,31 @@ export function precomputeNodeModeMask(graph) {
   }
 
   return nodeModeMask;
+}
+
+export function precomputeKernelGraphViews(graph) {
+  validateGraphForRouting(graph);
+
+  const nodeFirstEdgeIndex = new Uint32Array(graph.header.nNodes);
+  const nodeEdgeCount = new Uint16Array(graph.header.nNodes);
+  const edgeTargetNodeIndex = new Uint32Array(graph.header.nEdges);
+  const edgeWalkCostSeconds = new Uint16Array(graph.header.nEdges);
+
+  for (let nodeIndex = 0; nodeIndex < graph.header.nNodes; nodeIndex += 1) {
+    nodeFirstEdgeIndex[nodeIndex] = graph.nodeU32[nodeIndex * 4 + 2];
+    nodeEdgeCount[nodeIndex] = graph.nodeU16[nodeIndex * 8 + 6];
+  }
+  for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
+    edgeTargetNodeIndex[edgeIndex] = graph.edgeU32[edgeIndex * 3];
+    edgeWalkCostSeconds[edgeIndex] = graph.edgeU16[edgeIndex * 6 + 2];
+  }
+
+  return {
+    nodeFirstEdgeIndex,
+    nodeEdgeCount,
+    edgeTargetNodeIndex,
+    edgeWalkCostSeconds,
+  };
 }
 
 export function createNodeSpatialIndex(graph, nodePixels) {
@@ -377,29 +405,104 @@ export async function runWalkingIsochroneFromSourceNode(
   if (!mapData || typeof mapData !== 'object' || !mapData.graph) {
     throw new Error('mapData.graph is required');
   }
+  if (!mapData.kernelGraphViews || typeof mapData.kernelGraphViews !== 'object') {
+    throw new Error('mapData.kernelGraphViews is required');
+  }
+  if (
+    !Number.isInteger(sourceNodeIndex)
+    || sourceNodeIndex < 0
+    || sourceNodeIndex >= mapData.graph.header.nNodes
+  ) {
+    throw new Error(`sourceNodeIndex out of range: ${sourceNodeIndex}`);
+  }
 
   const allowedModeMask = options.allowedModeMask ?? EDGE_MODE_CAR_BIT;
-  const heapStrategy = options.heapStrategy ?? 'decrease-key';
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
   const edgeCostPrecomputeKernel = options.edgeCostPrecomputeKernel
     ?? mapData.edgeCostPrecomputeKernel
     ?? null;
-  const searchState = createWalkingSearchState(
+  if (
+    edgeCostPrecomputeKernel === null
+    || typeof edgeCostPrecomputeKernel !== 'object'
+    || typeof edgeCostPrecomputeKernel.precomputeEdgeCostsForGraph !== 'function'
+    || typeof edgeCostPrecomputeKernel.computeTravelTimeFieldForGraph !== 'function'
+  ) {
+    throw new Error('WASM routing kernel is required and must expose precompute/search methods');
+  }
+
+  const edgeTraversalCostSeconds = precomputeEdgeTraversalCostSecondsCache(
     mapData.graph,
+    allowedModeMask,
+    null,
+    {
+      edgeCostPrecomputeKernel,
+      onKernelError: options.onKernelError ?? null,
+      strictKernel: true,
+    },
+  );
+  const distSeconds = new Float32Array(mapData.graph.header.nNodes);
+  distSeconds.fill(Number.POSITIVE_INFINITY);
+
+  let done = false;
+  let settledCount = 0;
+  const searchState = {
+    graph: mapData.graph,
     sourceNodeIndex,
     timeLimitSeconds,
     allowedModeMask,
-    {
-      heapStrategy,
-      edgeCostPrecomputeKernel,
+    heapStrategy: 'wasm-kernel',
+    edgeTraversalCostSeconds,
+    distSeconds,
+    get done() {
+      return done;
     },
-  );
+    get settledCount() {
+      return settledCount;
+    },
+    isDone() {
+      return done;
+    },
+    expandOne() {
+      if (done) {
+        return -1;
+      }
+      const kernelResult = edgeCostPrecomputeKernel.computeTravelTimeFieldForGraph({
+        nodeFirstEdgeIndex: mapData.kernelGraphViews.nodeFirstEdgeIndex,
+        nodeEdgeCount: mapData.kernelGraphViews.nodeEdgeCount,
+        edgeTargetNodeIndex: mapData.kernelGraphViews.edgeTargetNodeIndex,
+        edgeModeMask: mapData.graph.edgeModeMask,
+        edgeRoadClassId: mapData.graph.edgeRoadClassId,
+        edgeMaxspeedKph: mapData.graph.edgeMaxspeedKph,
+        edgeWalkCostSeconds: mapData.kernelGraphViews.edgeWalkCostSeconds,
+        outDistSeconds: distSeconds,
+        sourceNodeIndex,
+        allowedModeMask,
+        timeLimitSeconds,
+      });
+      if (
+        kernelResult
+        && typeof kernelResult === 'object'
+        && Number.isInteger(kernelResult.settledNodeCount)
+        && kernelResult.settledNodeCount >= 0
+      ) {
+        settledCount = kernelResult.settledNodeCount;
+      } else {
+        settledCount = countFiniteTravelTimes(distSeconds);
+      }
+      done = true;
+      return sourceNodeIndex;
+    },
+  };
+
   const runSummary = await runSearchTimeSlicedWithRendering(shell, mapData, searchState, options);
   if (!runSummary.cancelled) {
     mapData.lastRoutingSnapshot = {
       sourceNodeIndex,
-      distSeconds: searchState.distSeconds,
+      distSeconds,
       allowedModeMask,
-      edgeTraversalCostSeconds: searchState.edgeTraversalCostSeconds,
+      edgeTraversalCostSeconds,
       colourCycleMinutes: options.colourCycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES,
     };
     runPostMvpTransitStub(mapData.graph, searchState);
@@ -413,22 +516,26 @@ async function loadEdgeCostPrecomputeKernel(options = {}) {
   }
 
   const enabled = options.enabled ?? true;
-  if (!enabled || !hasWebAssemblySupport()) {
-    return null;
+  if (!enabled) {
+    throw new Error('WASM routing kernel cannot be disabled');
+  }
+  const webAssemblyObject = options.webAssemblyObject ?? globalThis.WebAssembly;
+  if (!hasWebAssemblySupport({ WebAssembly: webAssemblyObject })) {
+    throw new Error(WASM_REQUIRED_MESSAGE);
   }
 
   try {
     const loadedWasmKernel = await instantiateRoutingKernelWasm({
       wasmUrl: options.url,
       fetchImpl: options.fetchImpl,
-      webAssemblyObject: options.webAssemblyObject,
+      webAssemblyObject,
     });
     return createWasmRoutingKernelFacade(loadedWasmKernel.exports);
   } catch (error) {
     if (typeof options.onLoadError === 'function') {
       options.onLoadError(error);
     }
-    return null;
+    throw error;
   }
 }
 
@@ -1019,6 +1126,7 @@ export async function initializeMapData(shell, options = {}) {
     const nodePixels = precomputeNodePixelCoordinates(graph);
     const nodeModeMask = precomputeNodeModeMask(graph);
     const nodeSpatialIndex = createNodeSpatialIndex(graph, nodePixels);
+    const kernelGraphViews = precomputeKernelGraphViews(graph);
     const pixelGrid = createPixelGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
     const travelTimeGrid = createTravelTimeGrid(graph.header.gridWidthPx, graph.header.gridHeightPx);
     clearGrid(pixelGrid);
@@ -1032,6 +1140,7 @@ export async function initializeMapData(shell, options = {}) {
       nodePixels,
       nodeModeMask,
       nodeSpatialIndex,
+      kernelGraphViews,
       pixelGrid,
       travelTimeGrid,
       edgeCostPrecomputeKernel,
@@ -1042,7 +1151,12 @@ export async function initializeMapData(shell, options = {}) {
     if (shell.exportSvgButton) {
       shell.exportSvgButton.disabled = true;
     }
-    showLoadingOverlay(shell, 'Initialization failed.', 0);
+    const failureMessage =
+      error && typeof error.message === 'string' && error.message.length > 0
+        ? error.message
+        : 'Initialization failed.';
+    showLoadingOverlay(shell, failureMessage, 0);
+    setRoutingStatus(shell, failureMessage);
     throw error;
   }
 }
@@ -3268,6 +3382,13 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
       }
     },
   });
+  if (
+    Number.isInteger(searchState.settledCount)
+    && searchState.settledCount >= 0
+    && searchState.settledCount >= settledNodeCount
+  ) {
+    settledNodeCount = searchState.settledCount;
+  }
   const routeElapsedMs = Math.max(0, Math.round(nowImpl() - routeStartMs));
 
   if (!runSummary.cancelled) {
@@ -3537,6 +3658,22 @@ function setRoutingStatus(shell, text) {
   shell.routingStatus.textContent = text;
 }
 
+export function ensureWasmSupportOrShowError(shell, options = {}) {
+  if (!shell || typeof shell !== 'object' || !shell.isochroneCanvas) {
+    throw new Error('shell.isochroneCanvas is required');
+  }
+  const runtimeGlobal = options.runtimeGlobal ?? globalThis;
+  if (hasWebAssemblySupport(runtimeGlobal)) {
+    return true;
+  }
+
+  shell.isochroneCanvas.style.pointerEvents = 'none';
+  shell.isochroneCanvas.dataset.graphLoaded = 'false';
+  showLoadingOverlay(shell, WASM_REQUIRED_MESSAGE, 0);
+  setRoutingStatus(shell, WASM_REQUIRED_MESSAGE);
+  return false;
+}
+
 function updateGraphLoadingText(shell, receivedBytes, totalBytes) {
   const receivedText = formatMebibytes(receivedBytes);
   if (totalBytes === null || totalBytes <= 0) {
@@ -3800,6 +3937,9 @@ function isClosedPath(path) {
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', () => {
     const shell = initializeAppShell(globalThis.document);
+    if (!ensureWasmSupportOrShowError(shell)) {
+      return;
+    }
     let initializedMapData = null;
     let routingBinding = null;
     const themeBinding = bindThemeControl(shell, {

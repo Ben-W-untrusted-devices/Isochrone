@@ -263,6 +263,10 @@ export function precomputeEdgeTraversalCostSecondsCache(
   }
 
   const edgeCostPrecomputeKernel = options.edgeCostPrecomputeKernel ?? null;
+  const strictKernel = options.strictKernel === true;
+  if (strictKernel && edgeCostPrecomputeKernel === null) {
+    throw new Error('WASM edge-cost precompute kernel is required when strictKernel=true');
+  }
   let kernelSucceeded = false;
   if (edgeCostPrecomputeKernel !== null) {
     if (
@@ -288,14 +292,23 @@ export function precomputeEdgeTraversalCostSecondsCache(
       if (typeof options.onKernelError === 'function') {
         options.onKernelError(error);
       }
+      if (strictKernel) {
+        throw error;
+      }
       kernelSucceeded = false;
     }
+  }
+  if (strictKernel && !kernelSucceeded) {
+    throw new Error('WASM edge-cost precompute kernel did not succeed');
   }
 
   for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
     const cachedCostSeconds = costSeconds[edgeIndex];
     const cachedCostIsValid =
       cachedCostSeconds === Infinity || (Number.isFinite(cachedCostSeconds) && cachedCostSeconds > 0);
+    if (strictKernel && !cachedCostIsValid) {
+      throw new Error(`WASM edge-cost precompute produced invalid cost at edge ${edgeIndex}`);
+    }
     if (!kernelSucceeded || !cachedCostIsValid) {
       costSeconds[edgeIndex] = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
     }

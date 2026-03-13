@@ -32,6 +32,9 @@ test('createWasmRoutingKernelFacade forwards precompute call to wasm export', ()
     precompute_edge_costs(...args) {
       calls.push(args);
     },
+    compute_travel_time_field() {
+      return 0;
+    },
   };
   const facade = createWasmRoutingKernelFacade(fakeExports);
 
@@ -58,6 +61,9 @@ test('instantiateRoutingKernelWasm uses instantiateStreaming and validates expor
       },
       wasm_dealloc() {},
       precompute_edge_costs() {},
+      compute_travel_time_field() {
+        return 0;
+      },
     },
   };
   let fetchCalls = 0;
@@ -88,6 +94,9 @@ test('instantiateRoutingKernelWasmFromBytes validates exports from byte instanti
       },
       wasm_dealloc() {},
       precompute_edge_costs() {},
+      compute_travel_time_field() {
+        return 0;
+      },
     },
   };
 
@@ -131,6 +140,9 @@ test('precomputeEdgeCostsForGraph writes back wasm results to output array', () 
         outView[index] = modeView[index] + roadView[index] + speedView[index] + walkCostView[index] + allowedModeMask;
       }
     },
+    compute_travel_time_field() {
+      return 0;
+    },
   };
   const facade = createWasmRoutingKernelFacade(fakeExports);
 
@@ -145,4 +157,64 @@ test('precomputeEdgeCostsForGraph writes back wasm results to output array', () 
   });
 
   assert.deepEqual(Array.from(outCostSeconds), [25, 29]);
+});
+
+test('computeTravelTimeFieldForGraph writes back wasm results and settled count', () => {
+  const memory = { buffer: new ArrayBuffer(8192) };
+  let nextPtr = 256;
+  const fakeExports = {
+    memory,
+    wasm_alloc(byteLength) {
+      const ptr = nextPtr;
+      nextPtr += byteLength;
+      return ptr;
+    },
+    wasm_dealloc() {},
+    precompute_edge_costs() {},
+    compute_travel_time_field(
+      outDistSecondsPtr,
+      _nodeFirstEdgeIndexPtr,
+      _nodeEdgeCountPtr,
+      nodeCount,
+      _edgeTargetNodeIndexPtr,
+      _edgeModeMaskPtr,
+      _edgeRoadClassPtr,
+      _edgeMaxspeedKphPtr,
+      _edgeWalkCostSecondsPtr,
+      _edgeCount,
+      sourceNodeIndex,
+      _allowedModeMask,
+      _timeLimitSeconds,
+    ) {
+      const outView = new Float32Array(memory.buffer, outDistSecondsPtr, nodeCount);
+      for (let nodeIndex = 0; nodeIndex < nodeCount; nodeIndex += 1) {
+        outView[nodeIndex] = Number.POSITIVE_INFINITY;
+      }
+      outView[sourceNodeIndex] = 0;
+      if (nodeCount > 1) {
+        outView[1] = 42;
+      }
+      return 2;
+    },
+  };
+  const facade = createWasmRoutingKernelFacade(fakeExports);
+
+  const outDistSeconds = new Float32Array(3);
+  const result = facade.computeTravelTimeFieldForGraph({
+    nodeFirstEdgeIndex: new Uint32Array([0, 1, 2]),
+    nodeEdgeCount: new Uint16Array([1, 1, 0]),
+    edgeTargetNodeIndex: new Uint32Array([1, 2]),
+    edgeModeMask: new Uint8Array([7, 7]),
+    edgeRoadClassId: new Uint8Array([11, 11]),
+    edgeMaxspeedKph: new Uint16Array([50, 50]),
+    edgeWalkCostSeconds: new Uint16Array([72, 72]),
+    outDistSeconds,
+    sourceNodeIndex: 0,
+    allowedModeMask: 4,
+  });
+
+  assert.equal(result.settledNodeCount, 2);
+  assert.equal(outDistSeconds[0], 0);
+  assert.equal(outDistSeconds[1], 42);
+  assert.equal(outDistSeconds[2], Number.POSITIVE_INFINITY);
 });

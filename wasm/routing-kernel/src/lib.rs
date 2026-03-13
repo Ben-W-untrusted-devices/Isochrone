@@ -8,6 +8,81 @@ const WALKING_SPEED_M_S: f32 = 1.4;
 const BIKE_CRUISE_SPEED_KPH: f32 = 20.0;
 const CAR_FALLBACK_SPEED_KPH: f32 = 30.0;
 
+struct MinHeap {
+    node_indices: Vec<u32>,
+    costs: Vec<f32>,
+}
+
+impl MinHeap {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            node_indices: Vec::with_capacity(capacity),
+            costs: Vec::with_capacity(capacity),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.node_indices.is_empty()
+    }
+
+    fn push(&mut self, node_index: u32, cost: f32) {
+        self.node_indices.push(node_index);
+        self.costs.push(cost);
+        self.sift_up(self.node_indices.len() - 1);
+    }
+
+    fn pop(&mut self) -> Option<(u32, f32)> {
+        if self.node_indices.is_empty() {
+            return None;
+        }
+
+        let last_index = self.node_indices.len() - 1;
+        self.node_indices.swap(0, last_index);
+        self.costs.swap(0, last_index);
+        let node_index = self.node_indices.pop()?;
+        let cost = self.costs.pop()?;
+
+        if !self.node_indices.is_empty() {
+            self.sift_down(0);
+        }
+
+        Some((node_index, cost))
+    }
+
+    fn sift_up(&mut self, mut index: usize) {
+        while index > 0 {
+            let parent_index = (index - 1) / 2;
+            if self.costs[parent_index] <= self.costs[index] {
+                break;
+            }
+            self.node_indices.swap(parent_index, index);
+            self.costs.swap(parent_index, index);
+            index = parent_index;
+        }
+    }
+
+    fn sift_down(&mut self, mut index: usize) {
+        let len = self.node_indices.len();
+        loop {
+            let left = index * 2 + 1;
+            if left >= len {
+                break;
+            }
+            let right = left + 1;
+            let mut smallest = left;
+            if right < len && self.costs[right] < self.costs[left] {
+                smallest = right;
+            }
+            if self.costs[index] <= self.costs[smallest] {
+                break;
+            }
+            self.node_indices.swap(index, smallest);
+            self.costs.swap(index, smallest);
+            index = smallest;
+        }
+    }
+}
+
 #[inline]
 fn edge_cost_seconds(
     allowed_mode_mask: u8,
@@ -118,6 +193,153 @@ pub extern "C" fn precompute_edge_costs(
             edge_walk_cost_seconds[index],
         );
     }
+}
+
+#[no_mangle]
+pub extern "C" fn compute_travel_time_field(
+    out_dist_seconds_ptr: *mut f32,
+    node_first_edge_index_ptr: *const u32,
+    node_edge_count_ptr: *const u16,
+    node_count: usize,
+    edge_target_node_index_ptr: *const u32,
+    edge_mode_mask_ptr: *const u8,
+    edge_road_class_ptr: *const u8,
+    edge_maxspeed_kph_ptr: *const u16,
+    edge_walk_cost_seconds_ptr: *const u16,
+    edge_count: usize,
+    source_node_index: u32,
+    allowed_mode_mask: u8,
+    time_limit_seconds: f32,
+) -> u32 {
+    if out_dist_seconds_ptr.is_null()
+        || node_first_edge_index_ptr.is_null()
+        || node_edge_count_ptr.is_null()
+        || node_count == 0
+        || (edge_count > 0
+            && (edge_target_node_index_ptr.is_null()
+                || edge_mode_mask_ptr.is_null()
+                || edge_road_class_ptr.is_null()
+                || edge_maxspeed_kph_ptr.is_null()
+                || edge_walk_cost_seconds_ptr.is_null()))
+    {
+        return 0;
+    }
+
+    let out_dist_seconds = unsafe { std::slice::from_raw_parts_mut(out_dist_seconds_ptr, node_count) };
+    let node_first_edge_index =
+        unsafe { std::slice::from_raw_parts(node_first_edge_index_ptr, node_count) };
+    let node_edge_count = unsafe { std::slice::from_raw_parts(node_edge_count_ptr, node_count) };
+    let edge_target_node_index = if edge_count > 0 {
+        unsafe { std::slice::from_raw_parts(edge_target_node_index_ptr, edge_count) }
+    } else {
+        &[]
+    };
+    let edge_mode_mask = if edge_count > 0 {
+        unsafe { std::slice::from_raw_parts(edge_mode_mask_ptr, edge_count) }
+    } else {
+        &[]
+    };
+    let edge_road_class = if edge_count > 0 {
+        unsafe { std::slice::from_raw_parts(edge_road_class_ptr, edge_count) }
+    } else {
+        &[]
+    };
+    let edge_maxspeed_kph = if edge_count > 0 {
+        unsafe { std::slice::from_raw_parts(edge_maxspeed_kph_ptr, edge_count) }
+    } else {
+        &[]
+    };
+    let edge_walk_cost_seconds = if edge_count > 0 {
+        unsafe { std::slice::from_raw_parts(edge_walk_cost_seconds_ptr, edge_count) }
+    } else {
+        &[]
+    };
+
+    for dist in out_dist_seconds.iter_mut() {
+        *dist = f32::INFINITY;
+    }
+
+    let source_index = source_node_index as usize;
+    if source_index >= node_count {
+        return 0;
+    }
+
+    let has_time_limit = time_limit_seconds.is_finite() && time_limit_seconds > 0.0;
+    let clamped_time_limit = if has_time_limit {
+        time_limit_seconds
+    } else {
+        f32::INFINITY
+    };
+
+    let mut settled = vec![0u8; node_count];
+    let mut settled_count = 0u32;
+    let mut heap = MinHeap::with_capacity(node_count.min(16_384));
+
+    out_dist_seconds[source_index] = 0.0;
+    heap.push(source_node_index, 0.0);
+
+    while !heap.is_empty() {
+        let Some((node_index_u32, cost_seconds)) = heap.pop() else {
+            break;
+        };
+        let node_index = node_index_u32 as usize;
+        if node_index >= node_count {
+            continue;
+        }
+        if cost_seconds > out_dist_seconds[node_index] {
+            continue;
+        }
+        if has_time_limit && cost_seconds > clamped_time_limit {
+            break;
+        }
+        if settled[node_index] == 1 {
+            continue;
+        }
+
+        settled[node_index] = 1;
+        settled_count = settled_count.saturating_add(1);
+
+        let first_edge_index = node_first_edge_index[node_index] as usize;
+        if first_edge_index >= edge_count {
+            continue;
+        }
+        let edge_span = node_edge_count[node_index] as usize;
+        let end_edge_index = first_edge_index.saturating_add(edge_span).min(edge_count);
+
+        for edge_index in first_edge_index..end_edge_index {
+            let mode_mask = edge_mode_mask[edge_index];
+            if (mode_mask & allowed_mode_mask) == 0 {
+                continue;
+            }
+
+            let edge_cost_seconds = edge_cost_seconds(
+                allowed_mode_mask,
+                mode_mask,
+                edge_road_class[edge_index],
+                edge_maxspeed_kph[edge_index],
+                edge_walk_cost_seconds[edge_index],
+            );
+            if !edge_cost_seconds.is_finite() || edge_cost_seconds <= 0.0 {
+                continue;
+            }
+
+            let target_node_index = edge_target_node_index[edge_index] as usize;
+            if target_node_index >= node_count {
+                continue;
+            }
+
+            let next_cost_seconds = cost_seconds + edge_cost_seconds;
+            if has_time_limit && next_cost_seconds > clamped_time_limit {
+                continue;
+            }
+            if next_cost_seconds < out_dist_seconds[target_node_index] {
+                out_dist_seconds[target_node_index] = next_cost_seconds;
+                heap.push(target_node_index as u32, next_cost_seconds);
+            }
+        }
+    }
+
+    settled_count
 }
 
 #[cfg(test)]

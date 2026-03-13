@@ -7,14 +7,17 @@ This document tracks the initial WASM groundwork for performance-critical routin
 - Introduce a dedicated Rust crate for routing hot-path kernels:
   - `wasm/routing-kernel/Cargo.toml`
   - `wasm/routing-kernel/src/lib.rs`
-- Expose a first low-level kernel export:
-  - `precompute_edge_costs(...)`
+- Expose kernel exports:
+  - `precompute_edge_costs(...)` for per-mode edge traversal cost cache
+  - `compute_travel_time_field(...)` for full-field travel-time search
 - Provide a repeatable build script:
   - `wasm/build-routing-kernel.sh`
 - Provide JS-side module loading and export validation:
   - `web/src/wasm/routing-kernel.js`
 
-Runtime now attempts to use this kernel for edge-cost precompute during search-state setup when the WASM module is available; it falls back to JS deterministically if unavailable or if kernel invocation fails.
+Runtime now requires this kernel for routing/search execution and edge-cost precompute. If WASM is unavailable, the app stops with:
+
+`Your browser does not support WASM, this app requires WASM for performance reasons`
 
 ## Why this shape
 
@@ -36,6 +39,5 @@ If `wasm32-unknown-unknown` stdlib is missing, the script fails fast with instal
 ## Next integration milestones (not implemented yet)
 
 1. Allocate typed-array views in WASM memory and benchmark JS-to-WASM transfer overhead.
-2. Keep side-by-side benchmark mode (`js` vs `wasm`) for `precompute_edge_costs` and enforce parity thresholds.
-3. If transfer overhead is acceptable, move additional kernels (batch edge relaxations / heap operations) behind the same interface.
-4. Keep parity tests for JS and WASM outputs before any default runtime switch.
+2. Reduce JS↔WASM copy overhead with persistent kernel-side buffers for repeated runs.
+3. Keep parity tests for kernel output stability across map updates and schema changes.

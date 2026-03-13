@@ -1,4 +1,10 @@
-const REQUIRED_EXPORTS = ['memory', 'wasm_alloc', 'wasm_dealloc', 'precompute_edge_costs'];
+const REQUIRED_EXPORTS = [
+  'memory',
+  'wasm_alloc',
+  'wasm_dealloc',
+  'precompute_edge_costs',
+  'compute_travel_time_field',
+];
 
 export function hasWebAssemblySupport(runtimeGlobal = globalThis) {
   return Boolean(runtimeGlobal && runtimeGlobal.WebAssembly);
@@ -205,6 +211,107 @@ export function createWasmRoutingKernelFacade(exportsObject) {
           allowedModeMask,
         );
         copyTypedArrayFromWasm(outCostSeconds, outPtr);
+      } finally {
+        freeAllocations();
+      }
+    },
+    computeTravelTimeFieldForGraph({
+      nodeFirstEdgeIndex,
+      nodeEdgeCount,
+      edgeTargetNodeIndex,
+      edgeModeMask,
+      edgeRoadClassId,
+      edgeMaxspeedKph,
+      edgeWalkCostSeconds,
+      outDistSeconds,
+      sourceNodeIndex,
+      allowedModeMask,
+      timeLimitSeconds = Number.POSITIVE_INFINITY,
+    }) {
+      if (!(nodeFirstEdgeIndex instanceof Uint32Array)) {
+        throw new Error('nodeFirstEdgeIndex must be a Uint32Array');
+      }
+      if (!(nodeEdgeCount instanceof Uint16Array)) {
+        throw new Error('nodeEdgeCount must be a Uint16Array');
+      }
+      if (!(edgeTargetNodeIndex instanceof Uint32Array)) {
+        throw new Error('edgeTargetNodeIndex must be a Uint32Array');
+      }
+      if (!(edgeModeMask instanceof Uint8Array)) {
+        throw new Error('edgeModeMask must be a Uint8Array');
+      }
+      if (!(edgeRoadClassId instanceof Uint8Array)) {
+        throw new Error('edgeRoadClassId must be a Uint8Array');
+      }
+      if (!(edgeMaxspeedKph instanceof Uint16Array)) {
+        throw new Error('edgeMaxspeedKph must be a Uint16Array');
+      }
+      if (!(edgeWalkCostSeconds instanceof Uint16Array)) {
+        throw new Error('edgeWalkCostSeconds must be a Uint16Array');
+      }
+      if (!(outDistSeconds instanceof Float32Array)) {
+        throw new Error('outDistSeconds must be a Float32Array');
+      }
+      if (!Number.isInteger(sourceNodeIndex) || sourceNodeIndex < 0) {
+        throw new Error('sourceNodeIndex must be a non-negative integer');
+      }
+      if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+        throw new Error('allowedModeMask must be a positive 8-bit integer');
+      }
+
+      const nodeCount = outDistSeconds.length;
+      const edgeCount = edgeTargetNodeIndex.length;
+      if (sourceNodeIndex >= nodeCount) {
+        throw new Error(`sourceNodeIndex out of range: ${sourceNodeIndex}`);
+      }
+      if (nodeFirstEdgeIndex.length < nodeCount || nodeEdgeCount.length < nodeCount) {
+        throw new Error('node arrays must each cover outDistSeconds.length');
+      }
+      if (
+        edgeModeMask.length < edgeCount
+        || edgeRoadClassId.length < edgeCount
+        || edgeMaxspeedKph.length < edgeCount
+        || edgeWalkCostSeconds.length < edgeCount
+      ) {
+        throw new Error('edge metadata arrays must each cover edgeTargetNodeIndex.length');
+      }
+
+      const normalizedTimeLimitSeconds =
+        Number.isFinite(timeLimitSeconds) && timeLimitSeconds > 0
+          ? timeLimitSeconds
+          : Number.POSITIVE_INFINITY;
+
+      try {
+        const outDistSecondsPtr = allocBytes(outDistSeconds.byteLength);
+        const nodeFirstEdgeIndexPtr = copyTypedArrayToWasm(nodeFirstEdgeIndex);
+        const nodeEdgeCountPtr = copyTypedArrayToWasm(nodeEdgeCount);
+        const edgeTargetNodeIndexPtr = copyTypedArrayToWasm(edgeTargetNodeIndex);
+        const edgeModeMaskPtr = copyTypedArrayToWasm(edgeModeMask);
+        const edgeRoadClassPtr = copyTypedArrayToWasm(edgeRoadClassId);
+        const edgeMaxspeedKphPtr = copyTypedArrayToWasm(edgeMaxspeedKph);
+        const edgeWalkCostSecondsPtr = copyTypedArrayToWasm(edgeWalkCostSeconds);
+
+        const settledNodeCount = exportsObject.compute_travel_time_field(
+          outDistSecondsPtr,
+          nodeFirstEdgeIndexPtr,
+          nodeEdgeCountPtr,
+          nodeCount,
+          edgeTargetNodeIndexPtr,
+          edgeModeMaskPtr,
+          edgeRoadClassPtr,
+          edgeMaxspeedKphPtr,
+          edgeWalkCostSecondsPtr,
+          edgeCount,
+          sourceNodeIndex,
+          allowedModeMask,
+          normalizedTimeLimitSeconds,
+        );
+        copyTypedArrayFromWasm(outDistSeconds, outDistSecondsPtr);
+        return {
+          settledNodeCount: Number.isInteger(settledNodeCount) && settledNodeCount >= 0
+            ? settledNodeCount
+            : 0,
+        };
       } finally {
         freeAllocations();
       }

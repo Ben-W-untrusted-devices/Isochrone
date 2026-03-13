@@ -4,9 +4,11 @@ import test from 'node:test';
 import {
   GRAPH_MAGIC,
   MinHeap,
+  WASM_REQUIRED_MESSAGE,
   computeEdgeTraversalCostSeconds,
   createNodeSpatialIndex,
   createWalkingSearchState,
+  ensureWasmSupportOrShowError,
   findNearestNodeIndexForModeFromSpatialIndex,
   mapCanvasPixelToGraphMeters,
   parseColourCycleMinutesFromLocationSearch,
@@ -22,6 +24,7 @@ import {
   updateDistanceScaleBar,
   timeToColour,
 } from '../src/app.js';
+import { precomputeEdgeTraversalCostSecondsCache } from '../src/core/routing.js';
 
 const EDGE_MODE_WALK_BIT = 1;
 const EDGE_MODE_BIKE_BIT = 1 << 1;
@@ -267,6 +270,48 @@ test('createWalkingSearchState falls back to JS edge-cost precompute on kernel f
   assert.ok(Math.abs(state.distSeconds[2] - 12) < 0.05);
 });
 
+test('precomputeEdgeTraversalCostSecondsCache strictKernel disallows fallback', () => {
+  const graph = createFixtureGraph();
+  assert.throws(
+    () =>
+      precomputeEdgeTraversalCostSecondsCache(graph, EDGE_MODE_CAR_BIT, null, {
+        strictKernel: true,
+      }),
+    /required when strictKernel=true/,
+  );
+
+  let kernelErrorCount = 0;
+  assert.throws(
+    () =>
+      precomputeEdgeTraversalCostSecondsCache(graph, EDGE_MODE_CAR_BIT, null, {
+        strictKernel: true,
+        edgeCostPrecomputeKernel: {
+          precomputeEdgeCostsForGraph() {
+            throw new Error('kernel unavailable');
+          },
+        },
+        onKernelError() {
+          kernelErrorCount += 1;
+        },
+      }),
+    /kernel unavailable/,
+  );
+  assert.equal(kernelErrorCount, 1);
+
+  assert.throws(
+    () =>
+      precomputeEdgeTraversalCostSecondsCache(graph, EDGE_MODE_CAR_BIT, null, {
+        strictKernel: true,
+        edgeCostPrecomputeKernel: {
+          precomputeEdgeCostsForGraph({ outCostSeconds }) {
+            outCostSeconds.fill(Number.NaN);
+          },
+        },
+      }),
+    /produced invalid cost at edge 0/,
+  );
+});
+
 test('node spatial index search prefers nearest node with an allowed mode', () => {
   const graph = createFixtureGraph();
   const nodePixels = precomputeNodePixelCoordinates(graph);
@@ -291,6 +336,31 @@ test('mapCanvasPixelToGraphMeters maps y-axis from canvas-down to northing-up', 
   assert.equal(topLeft.easting, 1000);
   assert.equal(topLeft.northing, 2000 + 255);
   assert.equal(bottomLeft.northing, 2000);
+});
+
+test('ensureWasmSupportOrShowError renders required message when WASM is unavailable', () => {
+  const shell = {
+    isochroneCanvas: {
+      style: { pointerEvents: 'auto' },
+      dataset: { graphLoaded: 'true' },
+    },
+    loadingOverlay: {
+      hidden: true,
+      classList: { remove() {} },
+    },
+    loadingText: { textContent: '' },
+    loadingProgressBar: { style: { width: '' } },
+    routingStatus: { textContent: '' },
+  };
+
+  const result = ensureWasmSupportOrShowError(shell, { runtimeGlobal: {} });
+
+  assert.equal(result, false);
+  assert.equal(shell.isochroneCanvas.style.pointerEvents, 'none');
+  assert.equal(shell.isochroneCanvas.dataset.graphLoaded, 'false');
+  assert.equal(shell.loadingOverlay.hidden, false);
+  assert.equal(shell.loadingText.textContent, WASM_REQUIRED_MESSAGE);
+  assert.equal(shell.routingStatus.textContent, WASM_REQUIRED_MESSAGE);
 });
 
 test('timeToColour wraps to the beginning after each configured cycle', () => {
