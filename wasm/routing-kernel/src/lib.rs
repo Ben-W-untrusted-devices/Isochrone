@@ -7,78 +7,83 @@ const ROAD_CLASS_MOTORWAY: u8 = 15;
 const WALKING_SPEED_M_S: f32 = 1.4;
 const BIKE_CRUISE_SPEED_KPH: f32 = 20.0;
 const CAR_FALLBACK_SPEED_KPH: f32 = 30.0;
+const COST_TICK_SCALE: f32 = 1_000.0;
 
-struct MinHeap {
-    node_indices: Vec<u32>,
-    costs: Vec<f32>,
+struct RadixHeap {
+    buckets: Vec<Vec<(u32, u32)>>,
+    last: u32,
+    len: usize,
 }
 
-impl MinHeap {
+impl RadixHeap {
     fn with_capacity(capacity: usize) -> Self {
+        let mut buckets = Vec::with_capacity(33);
+        for _ in 0..33 {
+            buckets.push(Vec::new());
+        }
+        buckets[0].reserve(capacity);
         Self {
-            node_indices: Vec::with_capacity(capacity),
-            costs: Vec::with_capacity(capacity),
+            buckets,
+            last: 0,
+            len: 0,
         }
     }
 
     fn is_empty(&self) -> bool {
-        self.node_indices.is_empty()
+        self.len == 0
     }
 
-    fn push(&mut self, node_index: u32, cost: f32) {
-        self.node_indices.push(node_index);
-        self.costs.push(cost);
-        self.sift_up(self.node_indices.len() - 1);
+    fn push(&mut self, node_index: u32, key: u32) {
+        debug_assert!(key >= self.last);
+        let bucket_index = Self::bucket_index(key, self.last);
+        self.buckets[bucket_index].push((node_index, key));
+        self.len += 1;
     }
 
-    fn pop(&mut self) -> Option<(u32, f32)> {
-        if self.node_indices.is_empty() {
+    fn pop(&mut self) -> Option<(u32, u32)> {
+        if self.len == 0 {
             return None;
         }
-
-        let last_index = self.node_indices.len() - 1;
-        self.node_indices.swap(0, last_index);
-        self.costs.swap(0, last_index);
-        let node_index = self.node_indices.pop()?;
-        let cost = self.costs.pop()?;
-
-        if !self.node_indices.is_empty() {
-            self.sift_down(0);
+        if self.buckets[0].is_empty() {
+            self.refill_bucket_zero();
         }
 
-        Some((node_index, cost))
+        let entry = self.buckets[0].pop();
+        if entry.is_some() {
+            self.len -= 1;
+        }
+        entry
     }
 
-    fn sift_up(&mut self, mut index: usize) {
-        while index > 0 {
-            let parent_index = (index - 1) / 2;
-            if self.costs[parent_index] <= self.costs[index] {
-                break;
-            }
-            self.node_indices.swap(parent_index, index);
-            self.costs.swap(parent_index, index);
-            index = parent_index;
+    fn bucket_index(key: u32, last: u32) -> usize {
+        if key == last {
+            0
+        } else {
+            (u32::BITS - (key ^ last).leading_zeros()) as usize
         }
     }
 
-    fn sift_down(&mut self, mut index: usize) {
-        let len = self.node_indices.len();
-        loop {
-            let left = index * 2 + 1;
-            if left >= len {
-                break;
-            }
-            let right = left + 1;
-            let mut smallest = left;
-            if right < len && self.costs[right] < self.costs[left] {
-                smallest = right;
-            }
-            if self.costs[index] <= self.costs[smallest] {
-                break;
-            }
-            self.node_indices.swap(index, smallest);
-            self.costs.swap(index, smallest);
-            index = smallest;
+    fn refill_bucket_zero(&mut self) {
+        let mut non_empty_index = 1usize;
+        while non_empty_index < self.buckets.len() && self.buckets[non_empty_index].is_empty() {
+            non_empty_index += 1;
+        }
+        if non_empty_index >= self.buckets.len() {
+            return;
+        }
+
+        let new_last = self.buckets[non_empty_index]
+            .iter()
+            .map(|entry| entry.1)
+            .min()
+            .unwrap_or(self.last);
+        self.last = new_last;
+
+        let mut moved_entries = Vec::new();
+        std::mem::swap(&mut moved_entries, &mut self.buckets[non_empty_index]);
+        for (node_index, key) in moved_entries {
+            let bucket_index = Self::bucket_index(key, self.last);
+            self.buckets[bucket_index].push((node_index, key));
         }
     }
 }
@@ -129,6 +134,30 @@ fn edge_cost_seconds(
     }
 
     best_cost
+}
+
+#[inline]
+fn quantize_seconds_to_ticks(seconds: f32) -> Option<u32> {
+    if !seconds.is_finite() || seconds <= 0.0 {
+        return None;
+    }
+
+    let scaled = (seconds as f64) * (COST_TICK_SCALE as f64);
+    if !scaled.is_finite() || scaled <= 0.0 {
+        return None;
+    }
+
+    let ticks = scaled.ceil();
+    if ticks >= u32::MAX as f64 {
+        Some(u32::MAX)
+    } else {
+        Some(ticks as u32)
+    }
+}
+
+#[inline]
+fn ticks_to_seconds(ticks: u32) -> f32 {
+    (ticks as f32) / COST_TICK_SCALE
 }
 
 #[no_mangle]
@@ -265,31 +294,49 @@ pub extern "C" fn compute_travel_time_field(
     }
 
     let has_time_limit = time_limit_seconds.is_finite() && time_limit_seconds > 0.0;
-    let clamped_time_limit = if has_time_limit {
-        time_limit_seconds
+    let clamped_time_limit_ticks = if has_time_limit {
+        quantize_seconds_to_ticks(time_limit_seconds).unwrap_or(u32::MAX)
     } else {
-        f32::INFINITY
+        u32::MAX
     };
 
+    let mut edge_cost_ticks = vec![0u32; edge_count];
+    for edge_index in 0..edge_count {
+        let mode_mask = edge_mode_mask[edge_index];
+        if (mode_mask & allowed_mode_mask) == 0 {
+            continue;
+        }
+
+        let cost_seconds = edge_cost_seconds(
+            allowed_mode_mask,
+            mode_mask,
+            edge_road_class[edge_index],
+            edge_maxspeed_kph[edge_index],
+            edge_walk_cost_seconds[edge_index],
+        );
+        edge_cost_ticks[edge_index] = quantize_seconds_to_ticks(cost_seconds).unwrap_or(0);
+    }
+
+    let mut dist_ticks = vec![u32::MAX; node_count];
     let mut settled = vec![0u8; node_count];
     let mut settled_count = 0u32;
-    let mut heap = MinHeap::with_capacity(node_count.min(16_384));
+    let mut heap = RadixHeap::with_capacity(node_count.min(16_384));
 
-    out_dist_seconds[source_index] = 0.0;
-    heap.push(source_node_index, 0.0);
+    dist_ticks[source_index] = 0;
+    heap.push(source_node_index, 0);
 
     while !heap.is_empty() {
-        let Some((node_index_u32, cost_seconds)) = heap.pop() else {
+        let Some((node_index_u32, cost_ticks)) = heap.pop() else {
             break;
         };
         let node_index = node_index_u32 as usize;
         if node_index >= node_count {
             continue;
         }
-        if cost_seconds > out_dist_seconds[node_index] {
+        if cost_ticks > dist_ticks[node_index] {
             continue;
         }
-        if has_time_limit && cost_seconds > clamped_time_limit {
+        if has_time_limit && cost_ticks > clamped_time_limit_ticks {
             break;
         }
         if settled[node_index] == 1 {
@@ -307,19 +354,8 @@ pub extern "C" fn compute_travel_time_field(
         let end_edge_index = first_edge_index.saturating_add(edge_span).min(edge_count);
 
         for edge_index in first_edge_index..end_edge_index {
-            let mode_mask = edge_mode_mask[edge_index];
-            if (mode_mask & allowed_mode_mask) == 0 {
-                continue;
-            }
-
-            let edge_cost_seconds = edge_cost_seconds(
-                allowed_mode_mask,
-                mode_mask,
-                edge_road_class[edge_index],
-                edge_maxspeed_kph[edge_index],
-                edge_walk_cost_seconds[edge_index],
-            );
-            if !edge_cost_seconds.is_finite() || edge_cost_seconds <= 0.0 {
+            let edge_ticks = edge_cost_ticks[edge_index];
+            if edge_ticks == 0 {
                 continue;
             }
 
@@ -328,15 +364,24 @@ pub extern "C" fn compute_travel_time_field(
                 continue;
             }
 
-            let next_cost_seconds = cost_seconds + edge_cost_seconds;
-            if has_time_limit && next_cost_seconds > clamped_time_limit {
+            let next_cost_ticks = cost_ticks.saturating_add(edge_ticks);
+            if has_time_limit && next_cost_ticks > clamped_time_limit_ticks {
                 continue;
             }
-            if next_cost_seconds < out_dist_seconds[target_node_index] {
-                out_dist_seconds[target_node_index] = next_cost_seconds;
-                heap.push(target_node_index as u32, next_cost_seconds);
+            if next_cost_ticks < dist_ticks[target_node_index] {
+                dist_ticks[target_node_index] = next_cost_ticks;
+                heap.push(target_node_index as u32, next_cost_ticks);
             }
         }
+    }
+
+    for index in 0..node_count {
+        let ticks = dist_ticks[index];
+        out_dist_seconds[index] = if ticks == u32::MAX {
+            f32::INFINITY
+        } else {
+            ticks_to_seconds(ticks)
+        };
     }
 
     settled_count
@@ -345,6 +390,66 @@ pub extern "C" fn compute_travel_time_field(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quantize_seconds_to_ticks_uses_positive_ceil() {
+        assert_eq!(quantize_seconds_to_ticks(0.0), None);
+        assert_eq!(quantize_seconds_to_ticks(-1.0), None);
+        assert_eq!(quantize_seconds_to_ticks(f32::INFINITY), None);
+        assert_eq!(quantize_seconds_to_ticks(0.0001), Some(1));
+        assert_eq!(quantize_seconds_to_ticks(1.0), Some(1_000));
+        assert_eq!(quantize_seconds_to_ticks(1.0001), Some(1_001));
+    }
+
+    #[test]
+    fn radix_heap_returns_non_decreasing_keys() {
+        let mut heap = RadixHeap::with_capacity(8);
+        heap.push(5, 50);
+        heap.push(2, 20);
+        heap.push(4, 40);
+        heap.push(3, 30);
+        heap.push(1, 10);
+
+        let mut keys = Vec::new();
+        while let Some((_node, key)) = heap.pop() {
+            keys.push(key);
+        }
+
+        assert_eq!(keys, vec![10, 20, 30, 40, 50]);
+    }
+
+    #[test]
+    fn compute_travel_time_field_respects_shortest_path_with_quantization() {
+        let node_first_edge_index = [0u32, 2, 3];
+        let node_edge_count = [2u16, 1, 0];
+        let edge_target_node_index = [1u32, 2, 2];
+        let edge_mode_mask = [EDGE_MODE_WALK_BIT; 3];
+        let edge_road_class = [11u8; 3];
+        let edge_maxspeed_kph = [50u16; 3];
+        let edge_walk_cost_seconds = [10u16, 25u16, 10u16];
+        let mut out_dist_seconds = [f32::INFINITY; 3];
+
+        let settled_count = compute_travel_time_field(
+            out_dist_seconds.as_mut_ptr(),
+            node_first_edge_index.as_ptr(),
+            node_edge_count.as_ptr(),
+            3,
+            edge_target_node_index.as_ptr(),
+            edge_mode_mask.as_ptr(),
+            edge_road_class.as_ptr(),
+            edge_maxspeed_kph.as_ptr(),
+            edge_walk_cost_seconds.as_ptr(),
+            3,
+            0,
+            EDGE_MODE_WALK_BIT,
+            f32::INFINITY,
+        );
+
+        assert_eq!(settled_count, 3);
+        assert_eq!(out_dist_seconds[0], 0.0);
+        assert_eq!(out_dist_seconds[1], 10.0);
+        assert_eq!(out_dist_seconds[2], 20.0);
+    }
 
     #[test]
     fn car_cost_uses_road_speed() {

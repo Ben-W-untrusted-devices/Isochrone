@@ -80,6 +80,9 @@ body {
   min-height: 100vh;
   background: var(--page-bg);
   color: var(--chrome-text);
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
 }
 
 .app-shell {
@@ -87,6 +90,9 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
 }
 
 .app-header {
