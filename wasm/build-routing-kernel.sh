@@ -8,8 +8,14 @@ TARGET_TRIPLE="wasm32-unknown-unknown"
 TARGET_DIR="${REPO_ROOT}/target"
 OUTPUT_DIR="${REPO_ROOT}/web/wasm"
 OUTPUT_FILE="${OUTPUT_DIR}/routing-kernel.wasm"
+HOMEBREW_RUSTUP_BIN="/opt/homebrew/opt/rustup/bin"
 
 mkdir -p "${OUTPUT_DIR}"
+
+# Prefer rustup-managed toolchain when available (Homebrew rustup is keg-only).
+if [[ -d "${HOMEBREW_RUSTUP_BIN}" ]]; then
+  export PATH="${HOMEBREW_RUSTUP_BIN}:${PATH}"
+fi
 
 if ! command -v cargo >/dev/null 2>&1; then
   echo "cargo not found; install Rust toolchain first." >&2
