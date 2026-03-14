@@ -24,6 +24,7 @@ import {
   precomputeNodePixelCoordinates,
   getOrBuildSnapshotEdgeVertexData,
   getOrBuildEdgeTraversalCostTicksForMode,
+  getOrRotateRoutingDistScratchBuffer,
   rerenderIsochroneFromSnapshotWithStatus,
   renderIsochroneLegendIfNeeded,
   shouldUploadEdgeGeometry,
@@ -262,6 +263,33 @@ test('getOrBuildEdgeTraversalCostTicksForMode quantizes and caches per mode', ()
   assert.notEqual(first, bike);
   assert.equal(bike[0], 500);
   assert.equal(bike[1], 0);
+});
+
+test('getOrRotateRoutingDistScratchBuffer alternates between two reusable buffers', () => {
+  const mapData = {};
+  const first = getOrRotateRoutingDistScratchBuffer(mapData, 3);
+  const second = getOrRotateRoutingDistScratchBuffer(mapData, 3);
+  const third = getOrRotateRoutingDistScratchBuffer(mapData, 3);
+
+  assert.ok(first instanceof Float32Array);
+  assert.ok(second instanceof Float32Array);
+  assert.equal(first.length, 3);
+  assert.equal(second.length, 3);
+  assert.notEqual(first, second);
+  assert.equal(third, first);
+});
+
+test('getOrRotateRoutingDistScratchBuffer rebuilds buffers when node count changes', () => {
+  const mapData = {};
+  const first = getOrRotateRoutingDistScratchBuffer(mapData, 2);
+  const second = getOrRotateRoutingDistScratchBuffer(mapData, 2);
+  const resized = getOrRotateRoutingDistScratchBuffer(mapData, 4);
+
+  assert.equal(first.length, 2);
+  assert.equal(second.length, 2);
+  assert.equal(resized.length, 4);
+  assert.notEqual(resized, first);
+  assert.notEqual(resized, second);
 });
 
 test('createWalkingSearchState can use provided edge-cost precompute kernel', () => {

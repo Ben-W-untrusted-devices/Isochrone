@@ -33,6 +33,8 @@ Runtime now requires this kernel for routing/search execution and edge-cost prec
 - `compute_travel_time_field(...)` now consumes precomputed per-edge traversal ticks (`edgeCostTicks`) directly, so route runs no longer recompute edge mode/speed costs inside the Rust search loop.
 - Tick arrays are built once per mode mask in JS and cached on the loaded graph object for reuse across repeated runs.
 - WASM search workspace buffers (`dist_ticks`, `settled`, radix-heap buckets) are now reused across runs via thread-local workspace storage, reducing repeated allocation/initialization churn per solve.
+- JS-side WASM output buffers are now cached per output typed-array identity, so repeated route runs stop allocating/deallocating output scratch pointers each solve.
+- App-side route output arrays now use a two-buffer rotating scratch strategy, avoiding per-run distance-array allocation while preserving snapshot stability between consecutive runs.
 
 ## Build command
 

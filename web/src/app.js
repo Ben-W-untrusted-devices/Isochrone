@@ -96,6 +96,8 @@ export const WASM_REQUIRED_MESSAGE =
   'Your browser does not support WASM, this app requires WASM for performance reasons';
 const WASM_EDGE_COST_TICK_SCALE = 1_000;
 const EDGE_TRAVERSAL_COST_TICK_CACHE_PROPERTY = '__edgeTraversalCostTicksByModeMask';
+const ROUTING_DIST_SCRATCH_BUFFERS_PROPERTY = '__routingDistScratchBuffers';
+const ROUTING_DIST_SCRATCH_NEXT_INDEX_PROPERTY = '__routingDistScratchNextIndex';
 export function precomputeNodeModeMask(graph) {
   validateGraphForRouting(graph);
 
@@ -450,8 +452,10 @@ export async function runWalkingIsochroneFromSourceNode(
     allowedModeMask,
     edgeTraversalCostSeconds,
   );
-  const distSeconds = new Float32Array(mapData.graph.header.nNodes);
-  distSeconds.fill(Number.POSITIVE_INFINITY);
+  const distSeconds = getOrRotateRoutingDistScratchBuffer(
+    mapData,
+    mapData.graph.header.nNodes,
+  );
 
   let done = false;
   let settledCount = 0;
@@ -1016,6 +1020,40 @@ export function bindHeaderMenuControl(shell, options = {}) {
 
 export function bindThemeControl(shell, options = {}) {
   return bindThemeControlInternal(shell, options);
+}
+
+export function getOrRotateRoutingDistScratchBuffer(mapData, nodeCount) {
+  if (!mapData || typeof mapData !== 'object') {
+    throw new Error('mapData must be an object');
+  }
+  if (!Number.isInteger(nodeCount) || nodeCount <= 0) {
+    throw new Error('nodeCount must be a positive integer');
+  }
+
+  let scratchBuffers = mapData[ROUTING_DIST_SCRATCH_BUFFERS_PROPERTY];
+  if (
+    !Array.isArray(scratchBuffers)
+    || scratchBuffers.length !== 2
+    || !(scratchBuffers[0] instanceof Float32Array)
+    || !(scratchBuffers[1] instanceof Float32Array)
+    || scratchBuffers[0].length !== nodeCount
+    || scratchBuffers[1].length !== nodeCount
+  ) {
+    scratchBuffers = [
+      new Float32Array(nodeCount),
+      new Float32Array(nodeCount),
+    ];
+    mapData[ROUTING_DIST_SCRATCH_BUFFERS_PROPERTY] = scratchBuffers;
+    mapData[ROUTING_DIST_SCRATCH_NEXT_INDEX_PROPERTY] = 0;
+  }
+
+  let nextIndex = mapData[ROUTING_DIST_SCRATCH_NEXT_INDEX_PROPERTY];
+  if (!Number.isInteger(nextIndex) || nextIndex < 0 || nextIndex >= scratchBuffers.length) {
+    nextIndex = 0;
+  }
+  const selectedBuffer = scratchBuffers[nextIndex];
+  mapData[ROUTING_DIST_SCRATCH_NEXT_INDEX_PROPERTY] = (nextIndex + 1) % scratchBuffers.length;
+  return selectedBuffer;
 }
 
 export function getOrBuildEdgeTraversalCostTicksForMode(

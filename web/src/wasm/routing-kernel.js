@@ -86,22 +86,7 @@ export async function instantiateRoutingKernelWasmFromBytes(
 export function createWasmRoutingKernelFacade(exportsObject) {
   validateRoutingKernelExports(exportsObject);
 
-  const temporaryAllocations = [];
   const cachedTypedArrayAllocations = new Map();
-  const allocBytes = (byteLength) => {
-    if (!Number.isInteger(byteLength) || byteLength < 0) {
-      throw new Error('byteLength must be a non-negative integer');
-    }
-    if (byteLength === 0) {
-      return 0;
-    }
-    const ptr = exportsObject.wasm_alloc(byteLength);
-    if (!Number.isInteger(ptr) || ptr <= 0) {
-      throw new Error(`WASM allocation failed for ${byteLength} bytes`);
-    }
-    temporaryAllocations.push({ ptr, byteLength });
-    return ptr;
-  };
   const getMemoryU8 = () => new Uint8Array(exportsObject.memory.buffer);
   const copyTypedArrayFromWasm = (targetTypedArray, ptr) => {
     if (targetTypedArray.byteLength === 0) {
@@ -116,7 +101,8 @@ export function createWasmRoutingKernelFacade(exportsObject) {
     );
     targetU8.set(sourceU8);
   };
-  const copyTypedArrayToCachedWasm = (typedArray) => {
+  const getOrCreateCachedTypedArrayAllocation = (typedArray, options = {}) => {
+    const copyFromSource = options.copyFromSource ?? true;
     if (!typedArray || typeof typedArray.byteLength !== 'number') {
       throw new Error('typedArray must be an ArrayBuffer view');
     }
@@ -137,30 +123,30 @@ export function createWasmRoutingKernelFacade(exportsObject) {
     if (!Number.isInteger(ptr) || ptr <= 0) {
       throw new Error(`WASM allocation failed for ${typedArray.byteLength} bytes`);
     }
-    const memoryU8 = getMemoryU8();
-    const sourceU8 = new Uint8Array(
-      typedArray.buffer,
-      typedArray.byteOffset,
-      typedArray.byteLength,
-    );
-    memoryU8.set(sourceU8, ptr);
+    if (copyFromSource) {
+      const memoryU8 = getMemoryU8();
+      const sourceU8 = new Uint8Array(
+        typedArray.buffer,
+        typedArray.byteOffset,
+        typedArray.byteLength,
+      );
+      memoryU8.set(sourceU8, ptr);
+    }
     cachedTypedArrayAllocations.set(typedArray, {
       ptr,
       byteLength: typedArray.byteLength,
     });
     return ptr;
   };
+  const copyTypedArrayToCachedWasm = (typedArray) =>
+    getOrCreateCachedTypedArrayAllocation(typedArray, { copyFromSource: true });
+  const allocateCachedOutputBufferForTypedArray = (typedArray) =>
+    getOrCreateCachedTypedArrayAllocation(typedArray, { copyFromSource: false });
   const releaseCachedTypedArrayAllocations = () => {
     for (const { ptr, byteLength } of cachedTypedArrayAllocations.values()) {
       exportsObject.wasm_dealloc(ptr, byteLength);
     }
     cachedTypedArrayAllocations.clear();
-  };
-  const freeAllocations = () => {
-    while (temporaryAllocations.length > 0) {
-      const { ptr, byteLength } = temporaryAllocations.pop();
-      exportsObject.wasm_dealloc(ptr, byteLength);
-    }
   };
 
   return {
@@ -223,26 +209,22 @@ export function createWasmRoutingKernelFacade(exportsObject) {
         return;
       }
 
-      try {
-        const outPtr = allocBytes(outCostSeconds.byteLength);
-        const edgeModeMaskPtr = copyTypedArrayToCachedWasm(edgeModeMask);
-        const edgeRoadClassPtr = copyTypedArrayToCachedWasm(edgeRoadClassId);
-        const edgeMaxspeedKphPtr = copyTypedArrayToCachedWasm(edgeMaxspeedKph);
-        const edgeWalkCostSecondsPtr = copyTypedArrayToCachedWasm(edgeWalkCostSeconds);
+      const outPtr = allocateCachedOutputBufferForTypedArray(outCostSeconds);
+      const edgeModeMaskPtr = copyTypedArrayToCachedWasm(edgeModeMask);
+      const edgeRoadClassPtr = copyTypedArrayToCachedWasm(edgeRoadClassId);
+      const edgeMaxspeedKphPtr = copyTypedArrayToCachedWasm(edgeMaxspeedKph);
+      const edgeWalkCostSecondsPtr = copyTypedArrayToCachedWasm(edgeWalkCostSeconds);
 
-        exportsObject.precompute_edge_costs(
-          outPtr,
-          edgeModeMaskPtr,
-          edgeRoadClassPtr,
-          edgeMaxspeedKphPtr,
-          edgeWalkCostSecondsPtr,
-          edgeCount,
-          allowedModeMask,
-        );
-        copyTypedArrayFromWasm(outCostSeconds, outPtr);
-      } finally {
-        freeAllocations();
-      }
+      exportsObject.precompute_edge_costs(
+        outPtr,
+        edgeModeMaskPtr,
+        edgeRoadClassPtr,
+        edgeMaxspeedKphPtr,
+        edgeWalkCostSecondsPtr,
+        edgeCount,
+        allowedModeMask,
+      );
+      copyTypedArrayFromWasm(outCostSeconds, outPtr);
     },
     computeTravelTimeFieldForGraph({
       nodeFirstEdgeIndex,
@@ -289,33 +271,29 @@ export function createWasmRoutingKernelFacade(exportsObject) {
           ? timeLimitSeconds
           : Number.POSITIVE_INFINITY;
 
-      try {
-        const outDistSecondsPtr = allocBytes(outDistSeconds.byteLength);
-        const nodeFirstEdgeIndexPtr = copyTypedArrayToCachedWasm(nodeFirstEdgeIndex);
-        const nodeEdgeCountPtr = copyTypedArrayToCachedWasm(nodeEdgeCount);
-        const edgeTargetNodeIndexPtr = copyTypedArrayToCachedWasm(edgeTargetNodeIndex);
-        const edgeCostTicksPtr = copyTypedArrayToCachedWasm(edgeCostTicks);
+      const outDistSecondsPtr = allocateCachedOutputBufferForTypedArray(outDistSeconds);
+      const nodeFirstEdgeIndexPtr = copyTypedArrayToCachedWasm(nodeFirstEdgeIndex);
+      const nodeEdgeCountPtr = copyTypedArrayToCachedWasm(nodeEdgeCount);
+      const edgeTargetNodeIndexPtr = copyTypedArrayToCachedWasm(edgeTargetNodeIndex);
+      const edgeCostTicksPtr = copyTypedArrayToCachedWasm(edgeCostTicks);
 
-        const settledNodeCount = exportsObject.compute_travel_time_field(
-          outDistSecondsPtr,
-          nodeFirstEdgeIndexPtr,
-          nodeEdgeCountPtr,
-          nodeCount,
-          edgeTargetNodeIndexPtr,
-          edgeCostTicksPtr,
-          edgeCount,
-          sourceNodeIndex,
-          normalizedTimeLimitSeconds,
-        );
-        copyTypedArrayFromWasm(outDistSeconds, outDistSecondsPtr);
-        return {
-          settledNodeCount: Number.isInteger(settledNodeCount) && settledNodeCount >= 0
-            ? settledNodeCount
-            : 0,
-        };
-      } finally {
-        freeAllocations();
-      }
+      const settledNodeCount = exportsObject.compute_travel_time_field(
+        outDistSecondsPtr,
+        nodeFirstEdgeIndexPtr,
+        nodeEdgeCountPtr,
+        nodeCount,
+        edgeTargetNodeIndexPtr,
+        edgeCostTicksPtr,
+        edgeCount,
+        sourceNodeIndex,
+        normalizedTimeLimitSeconds,
+      );
+      copyTypedArrayFromWasm(outDistSeconds, outDistSecondsPtr);
+      return {
+        settledNodeCount: Number.isInteger(settledNodeCount) && settledNodeCount >= 0
+          ? settledNodeCount
+          : 0,
+      };
     },
     releaseCachedGraphBuffers() {
       releaseCachedTypedArrayAllocations();

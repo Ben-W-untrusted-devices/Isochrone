@@ -299,7 +299,7 @@ test('computeTravelTimeFieldForGraph reuses cached graph buffers across runs', (
   const allocAfterFirstRun = allocCallCount;
   const deallocAfterFirstRun = deallocCallCount;
   assert.equal(allocAfterFirstRun, 5);
-  assert.equal(deallocAfterFirstRun, 1);
+  assert.equal(deallocAfterFirstRun, 0);
 
   const secondOut = new Float32Array(3);
   facade.computeTravelTimeFieldForGraph({
@@ -309,8 +309,11 @@ test('computeTravelTimeFieldForGraph reuses cached graph buffers across runs', (
   });
 
   assert.equal(allocCallCount, allocAfterFirstRun + 1);
-  assert.equal(deallocCallCount, deallocAfterFirstRun + 1);
+  assert.equal(deallocCallCount, deallocAfterFirstRun);
   assert.equal(secondOut[1], 0);
+
+  facade.releaseCachedGraphBuffers();
+  assert.equal(deallocCallCount, allocCallCount);
 });
 
 test('precomputeEdgeCostsForGraph reuses cached edge metadata buffers across runs', () => {
@@ -366,7 +369,7 @@ test('precomputeEdgeCostsForGraph reuses cached edge metadata buffers across run
   const allocAfterFirstRun = allocCallCount;
   const deallocAfterFirstRun = deallocCallCount;
   assert.equal(allocAfterFirstRun, 5);
-  assert.equal(deallocAfterFirstRun, 1);
+  assert.equal(deallocAfterFirstRun, 0);
 
   const secondOut = new Float32Array(2);
   facade.precomputeEdgeCostsForGraph({
@@ -375,6 +378,65 @@ test('precomputeEdgeCostsForGraph reuses cached edge metadata buffers across run
     allowedModeMask: 9,
   });
   assert.equal(allocCallCount, allocAfterFirstRun + 1);
-  assert.equal(deallocCallCount, deallocAfterFirstRun + 1);
+  assert.equal(deallocCallCount, deallocAfterFirstRun);
   assert.deepEqual(Array.from(secondOut), [9, 10]);
+
+  facade.releaseCachedGraphBuffers();
+  assert.equal(deallocCallCount, allocCallCount);
+});
+
+test('computeTravelTimeFieldForGraph reuses cached output buffer for repeated writes to same array', () => {
+  const memory = { buffer: new ArrayBuffer(16384) };
+  let nextPtr = 256;
+  let allocCallCount = 0;
+  const fakeExports = {
+    memory,
+    wasm_alloc(byteLength) {
+      allocCallCount += 1;
+      const ptr = (nextPtr + 7) & ~7;
+      nextPtr = ptr;
+      nextPtr += byteLength;
+      return ptr;
+    },
+    wasm_dealloc() {},
+    precompute_edge_costs() {},
+    compute_travel_time_field(
+      outDistSecondsPtr,
+      _nodeFirstEdgeIndexPtr,
+      _nodeEdgeCountPtr,
+      nodeCount,
+      _edgeTargetNodeIndexPtr,
+      _edgeCostTicksPtr,
+      _edgeCount,
+      sourceNodeIndex,
+    ) {
+      const outView = new Float32Array(memory.buffer, outDistSecondsPtr, nodeCount);
+      outView.fill(Number.POSITIVE_INFINITY);
+      outView[sourceNodeIndex] = 0;
+      return 1;
+    },
+  };
+  const facade = createWasmRoutingKernelFacade(fakeExports);
+
+  const outDistSeconds = new Float32Array(3);
+  const graphInputs = {
+    nodeFirstEdgeIndex: new Uint32Array([0, 1, 2]),
+    nodeEdgeCount: new Uint16Array([1, 1, 0]),
+    edgeTargetNodeIndex: new Uint32Array([1, 2]),
+    edgeCostTicks: new Uint32Array([72_000, 72_000]),
+    outDistSeconds,
+  };
+
+  facade.computeTravelTimeFieldForGraph({
+    ...graphInputs,
+    sourceNodeIndex: 0,
+  });
+  const allocAfterFirstRun = allocCallCount;
+  facade.computeTravelTimeFieldForGraph({
+    ...graphInputs,
+    sourceNodeIndex: 1,
+  });
+
+  assert.equal(allocAfterFirstRun, 5);
+  assert.equal(allocCallCount, allocAfterFirstRun);
 });
