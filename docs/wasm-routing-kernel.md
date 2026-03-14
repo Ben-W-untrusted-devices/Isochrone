@@ -47,6 +47,11 @@ Expected output:
 - `web/wasm/routing-kernel.wasm`
 
 If `wasm32-unknown-unknown` stdlib is missing, the script fails fast with install guidance.
+If `wasm-opt` is missing, the script fails fast with install guidance (`brew install binaryen` on macOS).
+
+Release/profile notes:
+- Cargo release profile uses `opt-level=3`, `codegen-units=1`, `lto="fat"`, `panic="abort"`, and symbol stripping.
+- Build output is post-optimized via `wasm-opt -O4 --all-features` before publishing to `web/wasm/`.
 
 ## Next integration milestones
 

@@ -22,6 +22,11 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v wasm-opt >/dev/null 2>&1; then
+  echo "wasm-opt not found; install Binaryen first (e.g. 'brew install binaryen')." >&2
+  exit 1
+fi
+
 if ! rustc --print target-list | grep -qx "${TARGET_TRIPLE}"; then
   echo "Rust toolchain does not list target ${TARGET_TRIPLE}." >&2
   exit 1
@@ -45,5 +50,9 @@ cargo build \
   --release \
   --target-dir "${TARGET_DIR}"
 
-cp "${TARGET_DIR}/${TARGET_TRIPLE}/release/routing_kernel.wasm" "${OUTPUT_FILE}"
+INPUT_WASM="${TARGET_DIR}/${TARGET_TRIPLE}/release/routing_kernel.wasm"
+
+echo "Optimizing routing-kernel.wasm with wasm-opt -O4..."
+wasm-opt -O4 --all-features "${INPUT_WASM}" -o "${OUTPUT_FILE}"
+
 echo "Wrote ${OUTPUT_FILE}"

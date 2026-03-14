@@ -696,6 +696,16 @@ Tasks
 Benchmark note (2026-03-11):
 - Decrease-key remained the default after local graph benchmark (5 rounds × 3 full-field runs): `decrease-key` ~132 ms avg vs `duplicate-push` ~136 ms avg.
 
+### 10.5.1 Planned (Not Implemented): Parallel SSSP Direction for Multi-Mode (Item 6)
+Estimated time: 5 hours
+
+Tasks
+- [ ] Prototype an integer-tick bucket/delta-stepping frontier in Rust/WASM (single-threaded first) to reduce multi-mode expand-loop overhead.
+- [ ] Add headless benchmark scenarios focused on multi-mode (`walk+bike`, `walk+car`, `all`) with fixed seeds and publish per-phase timing outputs.
+- [ ] Evaluate browser/runtime requirements for a WASM-threads path (Workers + `SharedArrayBuffer` + COOP/COEP) and document deployment implications.
+- [ ] Evaluate a WebGPU frontier-relax prototype as an alternative parallel path and compare complexity/perf against WASM threads.
+- [ ] Add a decision gate entry with chosen path, expected speedup target, and rollback criteria before implementation.
+
 ---
 
 ## 10.6 Post-MVP: Multi-Location OSM Fetch Generalization

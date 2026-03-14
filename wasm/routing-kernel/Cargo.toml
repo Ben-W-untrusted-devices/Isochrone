@@ -9,7 +9,8 @@ license = "MIT"
 crate-type = ["cdylib", "rlib"]
 
 [profile.release]
-lto = true
+lto = "fat"
 codegen-units = 1
 opt-level = 3
 panic = "abort"
+strip = "symbols"
