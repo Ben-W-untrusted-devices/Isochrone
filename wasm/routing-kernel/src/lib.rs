@@ -9,22 +9,25 @@ const WALKING_SPEED_M_S: f32 = 1.4;
 const BIKE_CRUISE_SPEED_KPH: f32 = 20.0;
 const CAR_FALLBACK_SPEED_KPH: f32 = 30.0;
 const COST_TICK_SCALE: f32 = 1_000.0;
+const RADIX_BUCKET_COUNT: usize = 33;
 
 struct RadixHeap {
     buckets: Vec<Vec<(u32, u32)>>,
+    bucket_min_keys: [u32; RADIX_BUCKET_COUNT],
     last: u32,
     len: usize,
 }
 
 impl RadixHeap {
     fn with_capacity(capacity: usize) -> Self {
-        let mut buckets = Vec::with_capacity(33);
-        for _ in 0..33 {
+        let mut buckets = Vec::with_capacity(RADIX_BUCKET_COUNT);
+        for _ in 0..RADIX_BUCKET_COUNT {
             buckets.push(Vec::new());
         }
         buckets[0].reserve(capacity);
         Self {
             buckets,
+            bucket_min_keys: [u32::MAX; RADIX_BUCKET_COUNT],
             last: 0,
             len: 0,
         }
@@ -38,6 +41,9 @@ impl RadixHeap {
         debug_assert!(key >= self.last);
         let bucket_index = Self::bucket_index(key, self.last);
         self.buckets[bucket_index].push((node_index, key));
+        if key < self.bucket_min_keys[bucket_index] {
+            self.bucket_min_keys[bucket_index] = key;
+        }
         self.len += 1;
     }
 
@@ -50,10 +56,14 @@ impl RadixHeap {
         }
 
         let entry = self.buckets[0].pop();
-        if entry.is_some() {
+        if let Some(_entry) = entry {
             self.len -= 1;
+            if self.buckets[0].is_empty() {
+                self.bucket_min_keys[0] = u32::MAX;
+            }
+            return Some(_entry);
         }
-        entry
+        None
     }
 
     fn bucket_index(key: u32, last: u32) -> usize {
@@ -66,25 +76,26 @@ impl RadixHeap {
 
     fn refill_bucket_zero(&mut self) {
         let mut non_empty_index = 1usize;
-        while non_empty_index < self.buckets.len() && self.buckets[non_empty_index].is_empty() {
+        while non_empty_index < self.buckets.len()
+            && self.bucket_min_keys[non_empty_index] == u32::MAX
+        {
             non_empty_index += 1;
         }
         if non_empty_index >= self.buckets.len() {
             return;
         }
 
-        let new_last = self.buckets[non_empty_index]
-            .iter()
-            .map(|entry| entry.1)
-            .min()
-            .unwrap_or(self.last);
-        self.last = new_last;
+        self.last = self.bucket_min_keys[non_empty_index];
 
         let mut moved_entries = Vec::new();
         std::mem::swap(&mut moved_entries, &mut self.buckets[non_empty_index]);
+        self.bucket_min_keys[non_empty_index] = u32::MAX;
         for (node_index, key) in moved_entries {
             let bucket_index = Self::bucket_index(key, self.last);
             self.buckets[bucket_index].push((node_index, key));
+            if key < self.bucket_min_keys[bucket_index] {
+                self.bucket_min_keys[bucket_index] = key;
+            }
         }
     }
 
@@ -92,6 +103,7 @@ impl RadixHeap {
         for bucket in self.buckets.iter_mut() {
             bucket.clear();
         }
+        self.bucket_min_keys.fill(u32::MAX);
         if let Some(bucket_zero) = self.buckets.get_mut(0) {
             let additional = capacity_hint.saturating_sub(bucket_zero.capacity());
             if additional > 0 {
@@ -479,6 +491,20 @@ mod tests {
         }
 
         assert_eq!(keys, vec![10, 20, 30, 40, 50]);
+    }
+
+    #[test]
+    fn radix_heap_handles_interleaved_push_pop_cycles() {
+        let mut heap = RadixHeap::with_capacity(4);
+        heap.push(1, 1_000);
+        heap.push(2, 2_000);
+        assert_eq!(heap.pop(), Some((1, 1_000)));
+        heap.push(3, 2_000);
+        heap.push(4, 3_000);
+        assert_eq!(heap.pop(), Some((3, 2_000)));
+        assert_eq!(heap.pop(), Some((2, 2_000)));
+        assert_eq!(heap.pop(), Some((4, 3_000)));
+        assert_eq!(heap.pop(), None);
     }
 
     #[test]
