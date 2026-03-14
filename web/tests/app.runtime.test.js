@@ -25,6 +25,7 @@ import {
   getOrBuildSnapshotEdgeVertexData,
   getOrBuildEdgeTraversalCostTicksForMode,
   getOrRotateRoutingDistScratchBuffer,
+  buildStaticEdgeNodeIndexedVertexData,
   rerenderIsochroneFromSnapshotWithStatus,
   renderIsochroneLegendIfNeeded,
   shouldUploadEdgeGeometry,
@@ -781,4 +782,38 @@ test('updateTravelTimesInStaticEdgeVertexTemplate updates only t-values and mark
   assert.equal(template.edgeVertexData[5], -1);
   assert.equal(template.edgeVertexData[8], -1);
   assert.equal(template.edgeVertexData[11], -1);
+});
+
+test('buildStaticEdgeNodeIndexedVertexData packs static vertex attributes for shader-side interpolation', () => {
+  const graph = createFixtureGraph();
+  const nodePixels = precomputeNodePixelCoordinates(graph);
+  const edgeTraversalCostSeconds = new Float32Array([10, 20]);
+  const template = buildStaticEdgeVertexTemplateForMode(
+    graph,
+    nodePixels,
+    EDGE_MODE_CAR_BIT,
+    {
+      edgeTraversalCostSeconds,
+    },
+  );
+
+  const packed = buildStaticEdgeNodeIndexedVertexData(template, edgeTraversalCostSeconds);
+  assert.ok(packed instanceof Float32Array);
+  assert.equal(packed.length, template.edgeCount * 12);
+
+  // Edge 0, start vertex
+  assert.equal(packed[0], template.edgeVertexData[0]);
+  assert.equal(packed[1], template.edgeVertexData[1]);
+  assert.equal(packed[2], template.sourceNodeIndices[0]);
+  assert.equal(packed[3], template.targetNodeIndices[0]);
+  assert.equal(packed[4], edgeTraversalCostSeconds[template.edgeIndices[0]]);
+  assert.equal(packed[5], 0);
+
+  // Edge 0, end vertex
+  assert.equal(packed[6], template.edgeVertexData[3]);
+  assert.equal(packed[7], template.edgeVertexData[4]);
+  assert.equal(packed[8], template.sourceNodeIndices[0]);
+  assert.equal(packed[9], template.targetNodeIndices[0]);
+  assert.equal(packed[10], edgeTraversalCostSeconds[template.edgeIndices[0]]);
+  assert.equal(packed[11], 1);
 });
