@@ -69,6 +69,7 @@ export function sampleEligibleSourceNodeIndices(graph, options = {}) {
     allowedModeMask = EDGE_MODE_CAR_BIT,
     seed = 1337,
     isNodeEligible = null,
+    edgeTraversalCostSeconds = null,
     maxAttemptsMultiplier = DEFAULT_MAX_SAMPLE_ATTEMPTS_MULTIPLIER,
   } = options;
 
@@ -84,13 +85,23 @@ export function sampleEligibleSourceNodeIndices(graph, options = {}) {
   if (isNodeEligible !== null && typeof isNodeEligible !== 'function') {
     throw new Error('isNodeEligible must be a function when provided');
   }
+  if (
+    isNodeEligible === null
+    && (
+      !(edgeTraversalCostSeconds instanceof Float32Array)
+      || edgeTraversalCostSeconds.length < graph.header.nEdges
+    )
+  ) {
+    throw new Error(
+      'edgeTraversalCostSeconds must be a Float32Array covering graph.header.nEdges when isNodeEligible is not provided',
+    );
+  }
 
   const nodeCount = graph.header.nNodes;
   const maxSamples = Math.min(sampleCount, nodeCount);
   const random = createSeededRng(seed);
   const selected = [];
   const seen = new Uint8Array(nodeCount);
-  const edgeTraversalCostSeconds = null;
   const eligibilityFn = isNodeEligible
     ?? ((nodeIndex) =>
       nodeHasAllowedModeOutgoingEdge(graph, nodeIndex, allowedModeMask, edgeTraversalCostSeconds));
@@ -135,7 +146,7 @@ export function runRoutingBenchmark(graph, options = {}) {
     sourceNodeIndices,
     allowedModeMask = EDGE_MODE_CAR_BIT,
     heapStrategy = 'decrease-key',
-    edgeCostPrecomputeKernel = null,
+    edgeCostPrecomputeKernel,
     nowImpl = defaultNowMs,
     cpuUsageImpl = defaultCpuUsage,
     includePerRun = false,
@@ -151,14 +162,12 @@ export function runRoutingBenchmark(graph, options = {}) {
     throw new Error("heapStrategy must be 'decrease-key' or 'duplicate-push'");
   }
   if (
-    edgeCostPrecomputeKernel !== null
-    && (
-      typeof edgeCostPrecomputeKernel !== 'object'
-      || typeof edgeCostPrecomputeKernel.precomputeEdgeCostsForGraph !== 'function'
-    )
+    edgeCostPrecomputeKernel === null
+    || typeof edgeCostPrecomputeKernel !== 'object'
+    || typeof edgeCostPrecomputeKernel.precomputeEdgeCostsForGraph !== 'function'
   ) {
     throw new Error(
-      'edgeCostPrecomputeKernel must expose precomputeEdgeCostsForGraph(...) when provided',
+      'edgeCostPrecomputeKernel is required and must expose precomputeEdgeCostsForGraph(...)',
     );
   }
   if (typeof nowImpl !== 'function') {

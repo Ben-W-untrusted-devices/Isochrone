@@ -40,6 +40,16 @@ export function createWalkingSearchState(
   if (!options || typeof options !== 'object') {
     throw new Error('options must be an object');
   }
+  const edgeCostPrecomputeKernel = options.edgeCostPrecomputeKernel ?? null;
+  if (
+    edgeCostPrecomputeKernel === null
+    || typeof edgeCostPrecomputeKernel !== 'object'
+    || typeof edgeCostPrecomputeKernel.precomputeEdgeCostsForGraph !== 'function'
+  ) {
+    throw new Error(
+      'options.edgeCostPrecomputeKernel is required and must expose precomputeEdgeCostsForGraph(...)',
+    );
+  }
   if (options.onKernelError !== null && options.onKernelError !== undefined && typeof options.onKernelError !== 'function') {
     throw new Error('options.onKernelError must be a function when provided');
   }
@@ -58,7 +68,7 @@ export function createWalkingSearchState(
     allowedModeMask,
     null,
     {
-      edgeCostPrecomputeKernel: options.edgeCostPrecomputeKernel ?? null,
+      edgeCostPrecomputeKernel,
       onKernelError: options.onKernelError ?? null,
     },
   );
@@ -263,54 +273,38 @@ export function precomputeEdgeTraversalCostSecondsCache(
   }
 
   const edgeCostPrecomputeKernel = options.edgeCostPrecomputeKernel ?? null;
-  const strictKernel = options.strictKernel === true;
-  if (strictKernel && edgeCostPrecomputeKernel === null) {
-    throw new Error('WASM edge-cost precompute kernel is required when strictKernel=true');
+  if (
+    edgeCostPrecomputeKernel === null
+    || typeof edgeCostPrecomputeKernel !== 'object'
+    || typeof edgeCostPrecomputeKernel.precomputeEdgeCostsForGraph !== 'function'
+  ) {
+    throw new Error(
+      'options.edgeCostPrecomputeKernel is required and must expose precomputeEdgeCostsForGraph(...)',
+    );
   }
-  let kernelSucceeded = false;
-  if (edgeCostPrecomputeKernel !== null) {
-    if (
-      typeof edgeCostPrecomputeKernel !== 'object'
-      || typeof edgeCostPrecomputeKernel.precomputeEdgeCostsForGraph !== 'function'
-    ) {
-      throw new Error(
-        'options.edgeCostPrecomputeKernel must expose precomputeEdgeCostsForGraph(...)',
-      );
-    }
 
-    try {
-      edgeCostPrecomputeKernel.precomputeEdgeCostsForGraph({
-        edgeModeMask: graph.edgeModeMask,
-        edgeRoadClassId: graph.edgeRoadClassId,
-        edgeMaxspeedKph: graph.edgeMaxspeedKph,
-        edgeWalkCostSeconds: getOrCreateEdgeWalkCostSeconds(graph),
-        outCostSeconds: costSeconds,
-        allowedModeMask,
-      });
-      kernelSucceeded = true;
-    } catch (error) {
-      if (typeof options.onKernelError === 'function') {
-        options.onKernelError(error);
-      }
-      if (strictKernel) {
-        throw error;
-      }
-      kernelSucceeded = false;
+  try {
+    edgeCostPrecomputeKernel.precomputeEdgeCostsForGraph({
+      edgeModeMask: graph.edgeModeMask,
+      edgeRoadClassId: graph.edgeRoadClassId,
+      edgeMaxspeedKph: graph.edgeMaxspeedKph,
+      edgeWalkCostSeconds: getOrCreateEdgeWalkCostSeconds(graph),
+      outCostSeconds: costSeconds,
+      allowedModeMask,
+    });
+  } catch (error) {
+    if (typeof options.onKernelError === 'function') {
+      options.onKernelError(error);
     }
-  }
-  if (strictKernel && !kernelSucceeded) {
-    throw new Error('WASM edge-cost precompute kernel did not succeed');
+    throw error;
   }
 
   for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
     const cachedCostSeconds = costSeconds[edgeIndex];
     const cachedCostIsValid =
       cachedCostSeconds === Infinity || (Number.isFinite(cachedCostSeconds) && cachedCostSeconds > 0);
-    if (strictKernel && !cachedCostIsValid) {
+    if (!cachedCostIsValid) {
       throw new Error(`WASM edge-cost precompute produced invalid cost at edge ${edgeIndex}`);
-    }
-    if (!kernelSucceeded || !cachedCostIsValid) {
-      costSeconds[edgeIndex] = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
     }
   }
 
@@ -338,18 +332,20 @@ export function getEdgeTraversalCostSeconds(
   allowedModeMask,
   edgeTraversalCostSeconds = null,
 ) {
-  if (edgeTraversalCostSeconds) {
-    const cachedCostSeconds = edgeTraversalCostSeconds[edgeIndex];
-    if (!Number.isNaN(cachedCostSeconds)) {
-      return cachedCostSeconds;
-    }
+  void allowedModeMask;
+  if (
+    !(edgeTraversalCostSeconds instanceof Float32Array)
+    || edgeTraversalCostSeconds.length < graph.header.nEdges
+  ) {
+    throw new Error(
+      'edgeTraversalCostSeconds precompute cache is required and must cover graph.header.nEdges',
+    );
   }
-
-  const computedCostSeconds = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
-  if (edgeTraversalCostSeconds) {
-    edgeTraversalCostSeconds[edgeIndex] = computedCostSeconds;
+  const cachedCostSeconds = edgeTraversalCostSeconds[edgeIndex];
+  if (Number.isNaN(cachedCostSeconds)) {
+    throw new Error(`edgeTraversalCostSeconds has NaN for edge ${edgeIndex}`);
   }
-  return computedCostSeconds;
+  return cachedCostSeconds;
 }
 
 export function nodeHasAllowedModeOutgoingEdge(

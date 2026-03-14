@@ -10,6 +10,7 @@ import {
 import {
   EDGE_MODE_CAR_BIT,
 } from '../src/config/constants.js';
+import { computeEdgeTraversalCostSeconds } from '../src/core/routing.js';
 
 function createGraphWithNoEdges(nodeCount = 8) {
   const nodeBuffer = new ArrayBuffer(nodeCount * 16);
@@ -92,6 +93,16 @@ function createFixtureGraph() {
   };
 }
 
+function createFixtureEdgeCostPrecomputeKernel(graph) {
+  return {
+    precomputeEdgeCostsForGraph({ outCostSeconds, allowedModeMask }) {
+      for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
+        outCostSeconds[edgeIndex] = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
+      }
+    },
+  };
+}
+
 test('createSeededRng returns deterministic pseudorandom sequence', () => {
   const rngA = createSeededRng(123);
   const rngB = createSeededRng(123);
@@ -142,6 +153,7 @@ test('runRoutingBenchmark returns aggregate metrics for sampled routes', () => {
     sourceNodeIndices: [0, 1],
     allowedModeMask: EDGE_MODE_CAR_BIT,
     heapStrategy: 'decrease-key',
+    edgeCostPrecomputeKernel: createFixtureEdgeCostPrecomputeKernel(graph),
     nowImpl: () => {
       const value = nowValues[nowIndex] ?? nowValues[nowValues.length - 1];
       nowIndex += 1;
@@ -156,4 +168,18 @@ test('runRoutingBenchmark returns aggregate metrics for sampled routes', () => {
   assert.ok(benchmark.wallMs.mean >= 1);
   assert.ok(benchmark.expandWallMs.mean >= 1);
   assert.ok(benchmark.msPerSettledNode > 0);
+});
+
+test('runRoutingBenchmark requires a WASM edge-cost precompute kernel', () => {
+  const graph = createFixtureGraph();
+  assert.throws(
+    () =>
+      runRoutingBenchmark(graph, {
+        sourceNodeIndices: [0],
+        allowedModeMask: EDGE_MODE_CAR_BIT,
+        heapStrategy: 'decrease-key',
+        edgeCostPrecomputeKernel: null,
+      }),
+    /must expose precomputeEdgeCostsForGraph/,
+  );
 });

@@ -444,7 +444,6 @@ export async function runWalkingIsochroneFromSourceNode(
     {
       edgeCostPrecomputeKernel,
       onKernelError: options.onKernelError ?? null,
-      strictKernel: true,
     },
   );
   const edgeTraversalCostTicks = getOrBuildEdgeTraversalCostTicksForMode(
@@ -587,8 +586,15 @@ export function getOrBuildSnapshotEdgeVertexData(mapData, snapshot, options = {}
 
   const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
     snapshot.edgeTraversalCostSeconds,
-  mapData.graph.header.nEdges,
-  ) ?? precomputeEdgeTraversalCostSecondsCache(mapData.graph, allowedModeMask);
+    mapData.graph.header.nEdges,
+  ) ?? precomputeEdgeTraversalCostSecondsCache(
+    mapData.graph,
+    allowedModeMask,
+    null,
+    {
+      edgeCostPrecomputeKernel: mapData.edgeCostPrecomputeKernel,
+    },
+  );
   const collectEdgeVerticesImpl = options.collectEdgeVerticesImpl ?? null;
   if (collectEdgeVerticesImpl !== null) {
     if (typeof collectEdgeVerticesImpl !== 'function') {
@@ -987,7 +993,14 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
     const edgeTraversalCostSeconds = validateEdgeTraversalCostSecondsLookup(
       snapshot.edgeTraversalCostSeconds,
       mapData.graph.header.nEdges,
-    ) ?? precomputeEdgeTraversalCostSecondsCache(mapData.graph, allowedModeMask);
+    ) ?? precomputeEdgeTraversalCostSecondsCache(
+      mapData.graph,
+      allowedModeMask,
+      null,
+      {
+        edgeCostPrecomputeKernel: mapData.edgeCostPrecomputeKernel,
+      },
+    );
     if (supportsGpuIndexedEdgeInterpolation) {
       const edgeNodeIndexedVertexData =
         getOrBuildStaticEdgeNodeIndexedVertexDataForModeFromMapData(

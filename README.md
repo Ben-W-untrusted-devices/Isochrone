@@ -26,14 +26,13 @@ npm run --silent bench:routing -- \
   --graph data_pipeline/output/graph-walk.bin \
   --samples 24 \
   --modes walk,bike,car,all \
-  --edge-kernel auto \
   --heap-strategies decrease-key,duplicate-push \
   --output-json data_pipeline/output/routing-benchmark.json
 ```
 
 - Uses deterministic random source-node sampling (`--seed`, default `1337`).
 - Runs routing headlessly in Node to isolate CPU/search behavior from browser rendering.
-- Supports JS/WASM edge-cost precompute engines (`--edge-kernel js|wasm|auto`).
+- Requires the WASM routing kernel (`web/wasm/routing-kernel.wasm`) for edge-cost precompute.
 - Reports per-mode/per-heap wall-time and CPU-time summaries.
 
 ## WASM runtime build

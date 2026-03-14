@@ -114,6 +114,23 @@ function createFixtureGraph() {
   };
 }
 
+function createFixtureEdgeCostPrecomputeKernel(graph, options = {}) {
+  return {
+    precomputeEdgeCostsForGraph({ outCostSeconds, allowedModeMask }) {
+      if (options.throwError) {
+        throw new Error(options.throwError);
+      }
+      if (options.fillNaN) {
+        outCostSeconds.fill(Number.NaN);
+        return;
+      }
+      for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
+        outCostSeconds[edgeIndex] = computeEdgeTraversalCostSeconds(graph, edgeIndex, allowedModeMask);
+      }
+    },
+  };
+}
+
 function createFixtureBinaryBuffer() {
   const headerSize = 64;
   const nodeRecordSize = 16;
@@ -218,7 +235,15 @@ test('computeEdgeTraversalCostSeconds obeys mode and road-class constraints', ()
 
 test('createWalkingSearchState settles reachable nodes and computes best costs', () => {
   const graph = createFixtureGraph();
-  const state = createWalkingSearchState(graph, 0, Number.POSITIVE_INFINITY, EDGE_MODE_CAR_BIT);
+  const state = createWalkingSearchState(
+    graph,
+    0,
+    Number.POSITIVE_INFINITY,
+    EDGE_MODE_CAR_BIT,
+    {
+      edgeCostPrecomputeKernel: createFixtureEdgeCostPrecomputeKernel(graph),
+    },
+  );
   while (!state.isDone()) {
     state.expandOne();
   }
@@ -230,7 +255,15 @@ test('createWalkingSearchState settles reachable nodes and computes best costs',
 
 test('createWalkingSearchState precomputes edge traversal cache for active mode', () => {
   const graph = createFixtureGraph();
-  const state = createWalkingSearchState(graph, 0, Number.POSITIVE_INFINITY, EDGE_MODE_CAR_BIT);
+  const state = createWalkingSearchState(
+    graph,
+    0,
+    Number.POSITIVE_INFINITY,
+    EDGE_MODE_CAR_BIT,
+    {
+      edgeCostPrecomputeKernel: createFixtureEdgeCostPrecomputeKernel(graph),
+    },
+  );
 
   assert.equal(state.edgeTraversalCostSeconds.length, graph.header.nEdges);
   for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
@@ -310,49 +343,39 @@ test('createWalkingSearchState can use provided edge-cost precompute kernel', ()
   assert.equal(state.edgeTraversalCostSeconds[1], 5);
 });
 
-test('createWalkingSearchState falls back to JS edge-cost precompute on kernel failure', () => {
+test('createWalkingSearchState rejects kernel failure instead of falling back to JS', () => {
   const graph = createFixtureGraph();
   let kernelFailureCount = 0;
-  const state = createWalkingSearchState(graph, 0, Number.POSITIVE_INFINITY, EDGE_MODE_CAR_BIT, {
-    edgeCostPrecomputeKernel: {
-      precomputeEdgeCostsForGraph() {
-        throw new Error('kernel unavailable');
-      },
-    },
-    onKernelError() {
-      kernelFailureCount += 1;
-    },
-  });
-
+  assert.throws(
+    () =>
+      createWalkingSearchState(graph, 0, Number.POSITIVE_INFINITY, EDGE_MODE_CAR_BIT, {
+        edgeCostPrecomputeKernel: createFixtureEdgeCostPrecomputeKernel(graph, {
+          throwError: 'kernel unavailable',
+        }),
+        onKernelError() {
+          kernelFailureCount += 1;
+        },
+      }),
+    /kernel unavailable/,
+  );
   assert.equal(kernelFailureCount, 1);
-  assert.ok(Number.isFinite(state.edgeTraversalCostSeconds[0]));
-  assert.ok(Number.isFinite(state.edgeTraversalCostSeconds[1]));
-  while (!state.isDone()) {
-    state.expandOne();
-  }
-  assert.ok(Math.abs(state.distSeconds[2] - 12) < 0.05);
 });
 
-test('precomputeEdgeTraversalCostSecondsCache strictKernel disallows fallback', () => {
+test('precomputeEdgeTraversalCostSecondsCache requires kernel and validates output', () => {
   const graph = createFixtureGraph();
   assert.throws(
     () =>
-      precomputeEdgeTraversalCostSecondsCache(graph, EDGE_MODE_CAR_BIT, null, {
-        strictKernel: true,
-      }),
-    /required when strictKernel=true/,
+      precomputeEdgeTraversalCostSecondsCache(graph, EDGE_MODE_CAR_BIT, null, {}),
+    /required and must expose precomputeEdgeCostsForGraph/,
   );
 
   let kernelErrorCount = 0;
   assert.throws(
     () =>
       precomputeEdgeTraversalCostSecondsCache(graph, EDGE_MODE_CAR_BIT, null, {
-        strictKernel: true,
-        edgeCostPrecomputeKernel: {
-          precomputeEdgeCostsForGraph() {
-            throw new Error('kernel unavailable');
-          },
-        },
+        edgeCostPrecomputeKernel: createFixtureEdgeCostPrecomputeKernel(graph, {
+          throwError: 'kernel unavailable',
+        }),
         onKernelError() {
           kernelErrorCount += 1;
         },
@@ -364,12 +387,9 @@ test('precomputeEdgeTraversalCostSecondsCache strictKernel disallows fallback', 
   assert.throws(
     () =>
       precomputeEdgeTraversalCostSecondsCache(graph, EDGE_MODE_CAR_BIT, null, {
-        strictKernel: true,
-        edgeCostPrecomputeKernel: {
-          precomputeEdgeCostsForGraph({ outCostSeconds }) {
-            outCostSeconds.fill(Number.NaN);
-          },
-        },
+        edgeCostPrecomputeKernel: createFixtureEdgeCostPrecomputeKernel(graph, {
+          fillNaN: true,
+        }),
       }),
     /produced invalid cost at edge 0/,
   );
