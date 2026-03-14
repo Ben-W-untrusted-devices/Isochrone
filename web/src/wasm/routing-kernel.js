@@ -248,13 +248,9 @@ export function createWasmRoutingKernelFacade(exportsObject) {
       nodeFirstEdgeIndex,
       nodeEdgeCount,
       edgeTargetNodeIndex,
-      edgeModeMask,
-      edgeRoadClassId,
-      edgeMaxspeedKph,
-      edgeWalkCostSeconds,
+      edgeCostTicks,
       outDistSeconds,
       sourceNodeIndex,
-      allowedModeMask,
       timeLimitSeconds = Number.POSITIVE_INFINITY,
     }) {
       if (!(nodeFirstEdgeIndex instanceof Uint32Array)) {
@@ -266,26 +262,14 @@ export function createWasmRoutingKernelFacade(exportsObject) {
       if (!(edgeTargetNodeIndex instanceof Uint32Array)) {
         throw new Error('edgeTargetNodeIndex must be a Uint32Array');
       }
-      if (!(edgeModeMask instanceof Uint8Array)) {
-        throw new Error('edgeModeMask must be a Uint8Array');
-      }
-      if (!(edgeRoadClassId instanceof Uint8Array)) {
-        throw new Error('edgeRoadClassId must be a Uint8Array');
-      }
-      if (!(edgeMaxspeedKph instanceof Uint16Array)) {
-        throw new Error('edgeMaxspeedKph must be a Uint16Array');
-      }
-      if (!(edgeWalkCostSeconds instanceof Uint16Array)) {
-        throw new Error('edgeWalkCostSeconds must be a Uint16Array');
+      if (!(edgeCostTicks instanceof Uint32Array)) {
+        throw new Error('edgeCostTicks must be a Uint32Array');
       }
       if (!(outDistSeconds instanceof Float32Array)) {
         throw new Error('outDistSeconds must be a Float32Array');
       }
       if (!Number.isInteger(sourceNodeIndex) || sourceNodeIndex < 0) {
         throw new Error('sourceNodeIndex must be a non-negative integer');
-      }
-      if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
-        throw new Error('allowedModeMask must be a positive 8-bit integer');
       }
 
       const nodeCount = outDistSeconds.length;
@@ -296,13 +280,8 @@ export function createWasmRoutingKernelFacade(exportsObject) {
       if (nodeFirstEdgeIndex.length < nodeCount || nodeEdgeCount.length < nodeCount) {
         throw new Error('node arrays must each cover outDistSeconds.length');
       }
-      if (
-        edgeModeMask.length < edgeCount
-        || edgeRoadClassId.length < edgeCount
-        || edgeMaxspeedKph.length < edgeCount
-        || edgeWalkCostSeconds.length < edgeCount
-      ) {
-        throw new Error('edge metadata arrays must each cover edgeTargetNodeIndex.length');
+      if (edgeCostTicks.length < edgeCount) {
+        throw new Error('edgeCostTicks must cover edgeTargetNodeIndex.length');
       }
 
       const normalizedTimeLimitSeconds =
@@ -315,10 +294,7 @@ export function createWasmRoutingKernelFacade(exportsObject) {
         const nodeFirstEdgeIndexPtr = copyTypedArrayToCachedWasm(nodeFirstEdgeIndex);
         const nodeEdgeCountPtr = copyTypedArrayToCachedWasm(nodeEdgeCount);
         const edgeTargetNodeIndexPtr = copyTypedArrayToCachedWasm(edgeTargetNodeIndex);
-        const edgeModeMaskPtr = copyTypedArrayToCachedWasm(edgeModeMask);
-        const edgeRoadClassPtr = copyTypedArrayToCachedWasm(edgeRoadClassId);
-        const edgeMaxspeedKphPtr = copyTypedArrayToCachedWasm(edgeMaxspeedKph);
-        const edgeWalkCostSecondsPtr = copyTypedArrayToCachedWasm(edgeWalkCostSeconds);
+        const edgeCostTicksPtr = copyTypedArrayToCachedWasm(edgeCostTicks);
 
         const settledNodeCount = exportsObject.compute_travel_time_field(
           outDistSecondsPtr,
@@ -326,13 +302,9 @@ export function createWasmRoutingKernelFacade(exportsObject) {
           nodeEdgeCountPtr,
           nodeCount,
           edgeTargetNodeIndexPtr,
-          edgeModeMaskPtr,
-          edgeRoadClassPtr,
-          edgeMaxspeedKphPtr,
-          edgeWalkCostSecondsPtr,
+          edgeCostTicksPtr,
           edgeCount,
           sourceNodeIndex,
-          allowedModeMask,
           normalizedTimeLimitSeconds,
         );
         copyTypedArrayFromWasm(outDistSeconds, outDistSecondsPtr);

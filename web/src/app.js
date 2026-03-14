@@ -94,6 +94,8 @@ export { timeToColour } from './render/colour.js';
 
 export const WASM_REQUIRED_MESSAGE =
   'Your browser does not support WASM, this app requires WASM for performance reasons';
+const WASM_EDGE_COST_TICK_SCALE = 1_000;
+const EDGE_TRAVERSAL_COST_TICK_CACHE_PROPERTY = '__edgeTraversalCostTicksByModeMask';
 export function precomputeNodeModeMask(graph) {
   validateGraphForRouting(graph);
 
@@ -443,6 +445,11 @@ export async function runWalkingIsochroneFromSourceNode(
       strictKernel: true,
     },
   );
+  const edgeTraversalCostTicks = getOrBuildEdgeTraversalCostTicksForMode(
+    mapData.graph,
+    allowedModeMask,
+    edgeTraversalCostSeconds,
+  );
   const distSeconds = new Float32Array(mapData.graph.header.nNodes);
   distSeconds.fill(Number.POSITIVE_INFINITY);
 
@@ -473,13 +480,9 @@ export async function runWalkingIsochroneFromSourceNode(
         nodeFirstEdgeIndex: mapData.kernelGraphViews.nodeFirstEdgeIndex,
         nodeEdgeCount: mapData.kernelGraphViews.nodeEdgeCount,
         edgeTargetNodeIndex: mapData.kernelGraphViews.edgeTargetNodeIndex,
-        edgeModeMask: mapData.graph.edgeModeMask,
-        edgeRoadClassId: mapData.graph.edgeRoadClassId,
-        edgeMaxspeedKph: mapData.graph.edgeMaxspeedKph,
-        edgeWalkCostSeconds: mapData.kernelGraphViews.edgeWalkCostSeconds,
+        edgeCostTicks: edgeTraversalCostTicks,
         outDistSeconds: distSeconds,
         sourceNodeIndex,
-        allowedModeMask,
         timeLimitSeconds,
       });
       if (
@@ -1013,6 +1016,52 @@ export function bindHeaderMenuControl(shell, options = {}) {
 
 export function bindThemeControl(shell, options = {}) {
   return bindThemeControlInternal(shell, options);
+}
+
+export function getOrBuildEdgeTraversalCostTicksForMode(
+  graph,
+  allowedModeMask,
+  edgeTraversalCostSeconds,
+) {
+  validateGraphForRouting(graph);
+  if (!Number.isInteger(allowedModeMask) || allowedModeMask <= 0 || allowedModeMask > 0xff) {
+    throw new Error('allowedModeMask must be a positive 8-bit integer');
+  }
+  if (
+    !(edgeTraversalCostSeconds instanceof Float32Array)
+    && !(edgeTraversalCostSeconds instanceof Float64Array)
+  ) {
+    throw new Error('edgeTraversalCostSeconds must be a Float32Array or Float64Array');
+  }
+  if (edgeTraversalCostSeconds.length < graph.header.nEdges) {
+    throw new Error('edgeTraversalCostSeconds must cover graph.header.nEdges');
+  }
+
+  let cacheByModeMask = graph[EDGE_TRAVERSAL_COST_TICK_CACHE_PROPERTY];
+  if (!cacheByModeMask || typeof cacheByModeMask !== 'object') {
+    cacheByModeMask = Object.create(null);
+    graph[EDGE_TRAVERSAL_COST_TICK_CACHE_PROPERTY] = cacheByModeMask;
+  }
+
+  let edgeTraversalCostTicks = cacheByModeMask[allowedModeMask];
+  if (
+    !(edgeTraversalCostTicks instanceof Uint32Array)
+    || edgeTraversalCostTicks.length < graph.header.nEdges
+  ) {
+    edgeTraversalCostTicks = new Uint32Array(graph.header.nEdges);
+    for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
+      const costSeconds = edgeTraversalCostSeconds[edgeIndex];
+      if (!Number.isFinite(costSeconds) || costSeconds <= 0) {
+        edgeTraversalCostTicks[edgeIndex] = 0;
+        continue;
+      }
+      const ticks = Math.ceil(costSeconds * WASM_EDGE_COST_TICK_SCALE);
+      edgeTraversalCostTicks[edgeIndex] = ticks >= 0xffff_ffff ? 0xffff_ffff : ticks;
+    }
+    cacheByModeMask[allowedModeMask] = edgeTraversalCostTicks;
+  }
+
+  return edgeTraversalCostTicks;
 }
 
 export function parseBoundaryBasemapPayload(payload) {

@@ -23,6 +23,7 @@ import {
   precomputeNodeModeMask,
   precomputeNodePixelCoordinates,
   getOrBuildSnapshotEdgeVertexData,
+  getOrBuildEdgeTraversalCostTicksForMode,
   rerenderIsochroneFromSnapshotWithStatus,
   renderIsochroneLegendIfNeeded,
   shouldUploadEdgeGeometry,
@@ -233,6 +234,34 @@ test('createWalkingSearchState precomputes edge traversal cache for active mode'
   for (let edgeIndex = 0; edgeIndex < graph.header.nEdges; edgeIndex += 1) {
     assert.ok(!Number.isNaN(state.edgeTraversalCostSeconds[edgeIndex]));
   }
+});
+
+test('getOrBuildEdgeTraversalCostTicksForMode quantizes and caches per mode', () => {
+  const graph = createFixtureGraph();
+  const edgeTraversalCostSeconds = new Float32Array([1.2, Number.POSITIVE_INFINITY]);
+
+  const first = getOrBuildEdgeTraversalCostTicksForMode(
+    graph,
+    EDGE_MODE_CAR_BIT,
+    edgeTraversalCostSeconds,
+  );
+  const second = getOrBuildEdgeTraversalCostTicksForMode(
+    graph,
+    EDGE_MODE_CAR_BIT,
+    new Float32Array([9.9, 9.9]),
+  );
+  const bike = getOrBuildEdgeTraversalCostTicksForMode(
+    graph,
+    EDGE_MODE_BIKE_BIT,
+    new Float32Array([0.5, 0]),
+  );
+
+  assert.equal(first, second);
+  assert.equal(first[0], Math.ceil(edgeTraversalCostSeconds[0] * 1000));
+  assert.equal(first[1], 0);
+  assert.notEqual(first, bike);
+  assert.equal(bike[0], 500);
+  assert.equal(bike[1], 0);
 });
 
 test('createWalkingSearchState can use provided edge-cost precompute kernel', () => {

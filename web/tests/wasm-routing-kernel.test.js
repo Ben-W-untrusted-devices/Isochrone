@@ -210,13 +210,9 @@ test('computeTravelTimeFieldForGraph writes back wasm results and settled count'
       _nodeEdgeCountPtr,
       nodeCount,
       _edgeTargetNodeIndexPtr,
-      _edgeModeMaskPtr,
-      _edgeRoadClassPtr,
-      _edgeMaxspeedKphPtr,
-      _edgeWalkCostSecondsPtr,
+      _edgeCostTicksPtr,
       _edgeCount,
       sourceNodeIndex,
-      _allowedModeMask,
       _timeLimitSeconds,
     ) {
       const outView = new Float32Array(memory.buffer, outDistSecondsPtr, nodeCount);
@@ -237,13 +233,9 @@ test('computeTravelTimeFieldForGraph writes back wasm results and settled count'
     nodeFirstEdgeIndex: new Uint32Array([0, 1, 2]),
     nodeEdgeCount: new Uint16Array([1, 1, 0]),
     edgeTargetNodeIndex: new Uint32Array([1, 2]),
-    edgeModeMask: new Uint8Array([7, 7]),
-    edgeRoadClassId: new Uint8Array([11, 11]),
-    edgeMaxspeedKph: new Uint16Array([50, 50]),
-    edgeWalkCostSeconds: new Uint16Array([72, 72]),
+    edgeCostTicks: new Uint32Array([72_000, 72_000]),
     outDistSeconds,
     sourceNodeIndex: 0,
-    allowedModeMask: 4,
   });
 
   assert.equal(result.settledNodeCount, 2);
@@ -276,10 +268,7 @@ test('computeTravelTimeFieldForGraph reuses cached graph buffers across runs', (
       _nodeEdgeCountPtr,
       nodeCount,
       _edgeTargetNodeIndexPtr,
-      _edgeModeMaskPtr,
-      _edgeRoadClassPtr,
-      _edgeMaxspeedKphPtr,
-      _edgeWalkCostSecondsPtr,
+      _edgeCostTicksPtr,
       _edgeCount,
       sourceNodeIndex,
     ) {
@@ -297,10 +286,7 @@ test('computeTravelTimeFieldForGraph reuses cached graph buffers across runs', (
     nodeFirstEdgeIndex: new Uint32Array([0, 1, 2]),
     nodeEdgeCount: new Uint16Array([1, 1, 0]),
     edgeTargetNodeIndex: new Uint32Array([1, 2]),
-    edgeModeMask: new Uint8Array([7, 7]),
-    edgeRoadClassId: new Uint8Array([11, 11]),
-    edgeMaxspeedKph: new Uint16Array([50, 50]),
-    edgeWalkCostSeconds: new Uint16Array([72, 72]),
+    edgeCostTicks: new Uint32Array([72_000, 72_000]),
   };
 
   const firstOut = new Float32Array(3);
@@ -308,12 +294,11 @@ test('computeTravelTimeFieldForGraph reuses cached graph buffers across runs', (
     ...graphInputs,
     outDistSeconds: firstOut,
     sourceNodeIndex: 0,
-    allowedModeMask: 4,
   });
 
   const allocAfterFirstRun = allocCallCount;
   const deallocAfterFirstRun = deallocCallCount;
-  assert.equal(allocAfterFirstRun, 8);
+  assert.equal(allocAfterFirstRun, 5);
   assert.equal(deallocAfterFirstRun, 1);
 
   const secondOut = new Float32Array(3);
@@ -321,7 +306,6 @@ test('computeTravelTimeFieldForGraph reuses cached graph buffers across runs', (
     ...graphInputs,
     outDistSeconds: secondOut,
     sourceNodeIndex: 1,
-    allowedModeMask: 4,
   });
 
   assert.equal(allocCallCount, allocAfterFirstRun + 1);

@@ -231,13 +231,9 @@ pub extern "C" fn compute_travel_time_field(
     node_edge_count_ptr: *const u16,
     node_count: usize,
     edge_target_node_index_ptr: *const u32,
-    edge_mode_mask_ptr: *const u8,
-    edge_road_class_ptr: *const u8,
-    edge_maxspeed_kph_ptr: *const u16,
-    edge_walk_cost_seconds_ptr: *const u16,
+    edge_cost_ticks_ptr: *const u32,
     edge_count: usize,
     source_node_index: u32,
-    allowed_mode_mask: u8,
     time_limit_seconds: f32,
 ) -> u32 {
     if out_dist_seconds_ptr.is_null()
@@ -246,10 +242,7 @@ pub extern "C" fn compute_travel_time_field(
         || node_count == 0
         || (edge_count > 0
             && (edge_target_node_index_ptr.is_null()
-                || edge_mode_mask_ptr.is_null()
-                || edge_road_class_ptr.is_null()
-                || edge_maxspeed_kph_ptr.is_null()
-                || edge_walk_cost_seconds_ptr.is_null()))
+                || edge_cost_ticks_ptr.is_null()))
     {
         return 0;
     }
@@ -263,23 +256,8 @@ pub extern "C" fn compute_travel_time_field(
     } else {
         &[]
     };
-    let edge_mode_mask = if edge_count > 0 {
-        unsafe { std::slice::from_raw_parts(edge_mode_mask_ptr, edge_count) }
-    } else {
-        &[]
-    };
-    let edge_road_class = if edge_count > 0 {
-        unsafe { std::slice::from_raw_parts(edge_road_class_ptr, edge_count) }
-    } else {
-        &[]
-    };
-    let edge_maxspeed_kph = if edge_count > 0 {
-        unsafe { std::slice::from_raw_parts(edge_maxspeed_kph_ptr, edge_count) }
-    } else {
-        &[]
-    };
-    let edge_walk_cost_seconds = if edge_count > 0 {
-        unsafe { std::slice::from_raw_parts(edge_walk_cost_seconds_ptr, edge_count) }
+    let edge_cost_ticks = if edge_count > 0 {
+        unsafe { std::slice::from_raw_parts(edge_cost_ticks_ptr, edge_count) }
     } else {
         &[]
     };
@@ -299,23 +277,6 @@ pub extern "C" fn compute_travel_time_field(
     } else {
         u32::MAX
     };
-
-    let mut edge_cost_ticks = vec![0u32; edge_count];
-    for edge_index in 0..edge_count {
-        let mode_mask = edge_mode_mask[edge_index];
-        if (mode_mask & allowed_mode_mask) == 0 {
-            continue;
-        }
-
-        let cost_seconds = edge_cost_seconds(
-            allowed_mode_mask,
-            mode_mask,
-            edge_road_class[edge_index],
-            edge_maxspeed_kph[edge_index],
-            edge_walk_cost_seconds[edge_index],
-        );
-        edge_cost_ticks[edge_index] = quantize_seconds_to_ticks(cost_seconds).unwrap_or(0);
-    }
 
     let mut dist_ticks = vec![u32::MAX; node_count];
     let mut settled = vec![0u8; node_count];
@@ -423,10 +384,7 @@ mod tests {
         let node_first_edge_index = [0u32, 2, 3];
         let node_edge_count = [2u16, 1, 0];
         let edge_target_node_index = [1u32, 2, 2];
-        let edge_mode_mask = [EDGE_MODE_WALK_BIT; 3];
-        let edge_road_class = [11u8; 3];
-        let edge_maxspeed_kph = [50u16; 3];
-        let edge_walk_cost_seconds = [10u16, 25u16, 10u16];
+        let edge_cost_ticks = [10_000u32, 25_000u32, 10_000u32];
         let mut out_dist_seconds = [f32::INFINITY; 3];
 
         let settled_count = compute_travel_time_field(
@@ -435,13 +393,9 @@ mod tests {
             node_edge_count.as_ptr(),
             3,
             edge_target_node_index.as_ptr(),
-            edge_mode_mask.as_ptr(),
-            edge_road_class.as_ptr(),
-            edge_maxspeed_kph.as_ptr(),
-            edge_walk_cost_seconds.as_ptr(),
+            edge_cost_ticks.as_ptr(),
             3,
             0,
-            EDGE_MODE_WALK_BIT,
             f32::INFINITY,
         );
 

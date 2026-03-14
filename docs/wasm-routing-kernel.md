@@ -30,6 +30,8 @@ Runtime now requires this kernel for routing/search execution and edge-cost prec
 - Static graph metadata arrays are now cached in WASM memory and reused across repeated route runs.
 - This removes repeated JS→WASM copies of node/edge structure arrays for each new source-node solve.
 - Per-run output buffers are still copied back to JS (`outDistSeconds` / `outCostSeconds`), while static graph buffers stay resident until facade disposal.
+- `compute_travel_time_field(...)` now consumes precomputed per-edge traversal ticks (`edgeCostTicks`) directly, so route runs no longer recompute edge mode/speed costs inside the Rust search loop.
+- Tick arrays are built once per mode mask in JS and cached on the loaded graph object for reuse across repeated runs.
 
 ## Build command
 
