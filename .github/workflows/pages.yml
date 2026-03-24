@@ -40,7 +40,7 @@ jobs:
           cp data_pipeline/output/berlin-district-boundaries-canvas.json site/data_pipeline/output/
           cp data_pipeline/output/graph-walk.bin.gz site/data_pipeline/output/
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: site
 
