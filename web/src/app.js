@@ -30,6 +30,7 @@ import {
 } from './core/coords.js';
 import {
   bindHeaderMenuControl as bindHeaderMenuControlInternal,
+  bindPointerButtonInversionControl as bindPointerButtonInversionControlInternal,
   bindThemeControl as bindThemeControlInternal,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
@@ -506,6 +507,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     renderIsochroneLegendIfNeeded,
     runWalkingIsochroneFromSourceNode,
     setRoutingStatus,
+    updateDistanceScaleBar,
   });
 }
 
@@ -1277,6 +1279,10 @@ export function bindHeaderMenuControl(shell, options = {}) {
 
 export function bindThemeControl(shell, options = {}) {
   return bindThemeControlInternal(shell, options);
+}
+
+export function bindPointerButtonInversionControl(shell, options = {}) {
+  return bindPointerButtonInversionControlInternal(shell, options);
 }
 
 export function getOrRotateRoutingDistScratchBuffer(mapData, nodeCount) {
@@ -5039,6 +5045,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
   window.addEventListener('DOMContentLoaded', () => {
     const shell = initializeAppShell(globalThis.document);
     bindHeaderMenuControl(shell);
+    bindPointerButtonInversionControl(shell);
     if (!ensureWasmSupportOrShowError(shell)) {
       return;
     }

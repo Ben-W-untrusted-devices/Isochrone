@@ -14,6 +14,7 @@ import {
 const CANONICAL_MODE_VALUES = ['walk', 'bike', 'car'];
 const CANONICAL_THEME_VALUES = ['light', 'dark'];
 const THEME_STORAGE_KEY = 'isochrone-theme';
+const POINTER_BUTTON_INVERSION_STORAGE_KEY = 'isochrone-invert-pointer-buttons';
 
 export function initializeAppShell(doc) {
   const resolvedDocument = doc ?? globalThis.document;
@@ -35,6 +36,7 @@ export function initializeAppShell(doc) {
   const renderBackendBadge = resolvedDocument.getElementById('render-backend-badge');
   const routingDisclaimer = resolvedDocument.getElementById('routing-disclaimer');
   const themeSelect = resolvedDocument.getElementById('theme-select');
+  const invertPointerButtonsInput = resolvedDocument.getElementById('invert-pointer-buttons');
   const modeSelect = resolvedDocument.getElementById('mode-select');
   const colourCycleMinutesInput = resolvedDocument.getElementById('colour-cycle-minutes');
   const exportSvgButton = resolvedDocument.getElementById('export-svg-button');
@@ -81,6 +83,9 @@ export function initializeAppShell(doc) {
   }
   if (!themeSelect || themeSelect.tagName !== 'SELECT') {
     throw new Error('index.html is missing <select id="theme-select">');
+  }
+  if (!invertPointerButtonsInput || invertPointerButtonsInput.tagName !== 'INPUT') {
+    throw new Error('index.html is missing <input id="invert-pointer-buttons">');
   }
   if (!modeSelect || modeSelect.tagName !== 'SELECT') {
     throw new Error('index.html is missing <select id="mode-select">');
@@ -146,6 +151,7 @@ export function initializeAppShell(doc) {
     renderBackendBadge,
     routingDisclaimer,
     themeSelect,
+    invertPointerButtonsInput,
     modeSelect,
     colourCycleMinutesInput,
     exportSvgButton,
@@ -155,6 +161,47 @@ export function initializeAppShell(doc) {
     isochroneLegend,
     loadingFadeTimeoutId: null,
     lastRenderedLegendCycleMinutes: null,
+  };
+}
+
+export function bindPointerButtonInversionControl(shell, options = {}) {
+  if (!shell || typeof shell !== 'object' || !shell.invertPointerButtonsInput) {
+    throw new Error('shell.invertPointerButtonsInput is required');
+  }
+
+  const storage = options.storage ?? globalThis.localStorage ?? null;
+  const storageKey = options.storageKey ?? POINTER_BUTTON_INVERSION_STORAGE_KEY;
+  if (typeof storageKey !== 'string' || storageKey.length === 0) {
+    throw new Error('storageKey must be a non-empty string');
+  }
+
+  const setChecked = (checked, persist = true) => {
+    shell.invertPointerButtonsInput.checked = checked === true;
+    if (persist) {
+      safeStorageSet(storage, storageKey, checked === true ? '1' : '0');
+    }
+    return shell.invertPointerButtonsInput.checked;
+  };
+
+  const persistedValue = safeStorageGet(storage, storageKey);
+  setChecked(
+    persistedValue === '1' || persistedValue === 'true' || persistedValue === 'yes' || persistedValue === 'on',
+    false,
+  );
+
+  const handleChange = () => {
+    setChecked(shell.invertPointerButtonsInput.checked, true);
+  };
+
+  shell.invertPointerButtonsInput.addEventListener('change', handleChange);
+
+  return {
+    dispose() {
+      shell.invertPointerButtonsInput.removeEventListener('change', handleChange);
+    },
+    setChecked(checked, applyOptions = {}) {
+      return setChecked(checked, applyOptions.persist !== false);
+    },
   };
 }
 

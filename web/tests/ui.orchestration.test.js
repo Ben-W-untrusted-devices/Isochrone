@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   bindHeaderMenuControl,
   bindModeSelectControl,
+  bindPointerButtonInversionControl,
   bindThemeControl,
 } from '../src/ui/orchestration.js';
 
@@ -62,6 +63,14 @@ function createThemeSelect(initialValue = 'light') {
   return {
     ...eventTarget,
     value: initialValue,
+  };
+}
+
+function createCheckbox(initialChecked = false) {
+  const eventTarget = createEventTarget();
+  return {
+    ...eventTarget,
+    checked: initialChecked,
   };
 }
 
@@ -244,6 +253,34 @@ test('bindThemeControl setTheme supports non-persistent temporary overrides', ()
   assert.deepEqual(persistedWrites, []);
 
   binding.dispose();
+});
+
+test('bindPointerButtonInversionControl restores persisted checkbox state and persists changes', () => {
+  const invertPointerButtonsInput = createCheckbox(false);
+  const shell = { invertPointerButtonsInput };
+  let storedValue = '1';
+  const storage = {
+    getItem(key) {
+      assert.equal(key, 'isochrone-invert-pointer-buttons');
+      return storedValue;
+    },
+    setItem(key, value) {
+      assert.equal(key, 'isochrone-invert-pointer-buttons');
+      storedValue = value;
+    },
+  };
+
+  const binding = bindPointerButtonInversionControl(shell, { storage });
+  assert.equal(invertPointerButtonsInput.checked, true);
+
+  invertPointerButtonsInput.checked = false;
+  invertPointerButtonsInput.emit('change');
+  assert.equal(storedValue, '0');
+
+  binding.dispose();
+  invertPointerButtonsInput.checked = true;
+  invertPointerButtonsInput.emit('change');
+  assert.equal(storedValue, '0');
 });
 
 test('bindHeaderMenuControl closes menu on outside pointerdown and Escape key', () => {

@@ -69,8 +69,13 @@ make wasm-build
 - Web runtime loads `data_pipeline/output/graph-walk.bin.gz` by default.
 - The graph payload is gzip-compressed and decompressed in-browser before parsing.
 - Clicking the map computes a full travel-time field across all reachable graph nodes (no walk-time cap).
+- Desktop controls:
+  - Primary click selects a new origin.
+  - Primary drag pans the map.
+  - Mouse wheel zooms at the pointer.
+  - Secondary drag moves the selection point.
 - Last selected start node is persisted in URL query params as `node=<graphNodeId>` and restored on reload.
-- Theme, transport modes, and colour cycle controls are in the header **Options** menu (standard HTML `<details>/<summary>` hamburger).
+- Theme, pointer-button inversion, transport modes, and colour cycle controls are in the header **Options** menu (standard HTML `<details>/<summary>` hamburger).
 - Current binary schema details and compatibility policy: `docs/graph-binary-schema-v2.md`.
 
 ## SVG export

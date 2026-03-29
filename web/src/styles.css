@@ -170,6 +170,15 @@ body {
   gap: 0.32rem;
 }
 
+.control-row-checkbox {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.control-row-checkbox label {
+  margin-right: 0.5rem;
+}
+
 .control-row label {
   font-size: 0.9rem;
   color: var(--chrome-label);
@@ -247,6 +256,8 @@ body {
   max-width: 100%;
   max-height: 100%;
   aspect-ratio: var(--map-aspect-ratio, 4 / 3);
+  transform-origin: 0 0;
+  will-change: transform;
 }
 
 @supports (width: 1cqw) {
