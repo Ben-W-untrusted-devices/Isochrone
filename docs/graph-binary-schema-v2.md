@@ -4,9 +4,9 @@ This document defines the current exported graph binary contract and versioning 
 
 ## Versioning policy
 - Writers export `version = 2`.
-- Tooling readers/validators accept both `v1` and `v2` payloads.
+- Pipeline tooling readers/validators accept both `v1` and `v2` payloads for inspection and migration support.
 - `v1` payloads are interpreted as having zeroed edge metadata (`mode_mask = 0`, `maxspeed_kph = 0`, `road_class_id = 0`).
-- Runtime migration policy: browser routing can require `v2` after mode-aware costing is implemented end-to-end.
+- Browser runtime currently requires `v2` and rejects older payloads.
 
 ## Edge record (12 bytes, v2)
 
@@ -46,7 +46,7 @@ When explicit speed tags are absent/unusable:
 
 ## Cost strategy decision
 - Chosen strategy: runtime bike/car costing from edge geometry + metadata.
-- Transitional rule: keep existing precomputed `cost_seconds` (walking) for MVP compatibility.
+- Transitional rule: keep existing precomputed `cost_seconds` (walking) in the binary while runtime bike/car costs are derived from metadata.
 - Follow-up phases add mode-aware cost functions without changing the on-disk edge record size.
 
 ## Reserved restriction bits

@@ -31,7 +31,7 @@ npm run --silent bench:routing -- \
 
 - Uses deterministic random source-node sampling (`--seed`, default `1337`).
 - Runs routing headlessly in Node to isolate CPU/search behavior from browser rendering.
-- Requires the WASM routing kernel (`web/wasm/routing-kernel.wasm`) for edge-cost precompute.
+- Requires the WASM routing kernel (`web/wasm/routing-kernel.wasm`) for routing/search and edge-cost precompute.
 - Reports per-mode phase timings: `precompute`, `tick-pack`, `search`, `dist-output`, and `total`.
 
 Stable/low-variance benchmark mode:
@@ -74,8 +74,11 @@ make wasm-build
   - Primary drag pans the map.
   - Mouse wheel zooms at the pointer.
   - Secondary drag moves the selection point.
+- Zoom/pan redraw the current routing snapshot; camera movement does not start a new route solve.
 - Last selected start node is persisted in URL query params as `node=<graphNodeId>` and restored on reload.
-- Theme, pointer-button inversion, transport modes, and colour cycle controls are in the header **Options** menu (standard HTML `<details>/<summary>` hamburger).
+- Selected transport modes and colour-cycle duration are also persisted in the URL as `modes=` and `cycle=`.
+- Theme, pointer-button inversion, transport modes, and colour cycle controls are in the header **Options** menu.
+- Page scrolling is disabled while interacting with the map viewport so touch gestures stay attached to the map.
 - Current binary schema details and compatibility policy: `docs/graph-binary-schema-v2.md`.
 
 ## SVG export
