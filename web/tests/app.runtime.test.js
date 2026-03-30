@@ -559,6 +559,45 @@ test('updateDistanceScaleBar sets distance-aligned segment width for patterned b
   assert.equal(shell.distanceScaleLine.style.values['--scale-segment-width-px'], '20px');
 });
 
+test('updateDistanceScaleBar reflects zoomed viewport scale', () => {
+  const lineStyle = {
+    width: '',
+    values: {},
+    setProperty(name, value) {
+      this.values[name] = value;
+    },
+  };
+  const shell = {
+    distanceScale: {},
+    distanceScaleLine: { style: lineStyle },
+    distanceScaleLabel: { textContent: '' },
+    isochroneCanvas: {
+      getBoundingClientRect() {
+        return { width: 1000 };
+      },
+    },
+  };
+  const graphHeader = {
+    originEasting: 0,
+    originNorthing: 0,
+    gridWidthPx: 1000,
+    gridHeightPx: 500,
+    pixelSizeM: 10,
+  };
+
+  updateDistanceScaleBar(shell, graphHeader, {
+    viewport: {
+      scale: 2,
+      offsetXPx: 250,
+      offsetYPx: 0,
+    },
+  });
+
+  assert.equal(shell.distanceScaleLine.style.width, '100px');
+  assert.equal(shell.distanceScaleLabel.textContent, '500 m');
+  assert.equal(shell.distanceScaleLine.style.values['--scale-segment-width-px'], '20px');
+});
+
 test('parseNodeIndexFromLocationSearch validates and clamps invalid params', () => {
   assert.equal(parseNodeIndexFromLocationSearch('?node=12', 100), 12);
   assert.equal(parseNodeIndexFromLocationSearch('?node=-1', 100), null);

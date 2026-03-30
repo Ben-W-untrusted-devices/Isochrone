@@ -1,11 +1,18 @@
+import {
+  createDefaultMapViewport,
+  mapScreenCanvasPixelToGraphPixel,
+  panMapViewportByCanvasDelta,
+  zoomMapViewportAtCanvasPixel,
+} from '../core/viewport.js';
+
 const NAVIGATION_DRAG_THRESHOLD_PX = 5;
 const MAX_VIEWPORT_SCALE = 8;
 const MIN_VIEWPORT_SCALE = 1;
 const WHEEL_ZOOM_SENSITIVITY = 0.0015;
 
 export function bindCanvasClickRouting(shell, mapData, options = {}, dependencies = {}) {
-  if (!shell || !shell.isochroneCanvas || !shell.canvasStack || !shell.mapRegion) {
-    throw new Error('shell.isochroneCanvas, shell.canvasStack, and shell.mapRegion are required');
+  if (!shell || !shell.isochroneCanvas) {
+    throw new Error('shell.isochroneCanvas is required');
   }
   if (!mapData || typeof mapData !== 'object' || !mapData.graph) {
     throw new Error('mapData.graph is required');
@@ -22,6 +29,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     runWalkingIsochroneFromSourceNode,
     setRoutingStatus,
     updateDistanceScaleBar,
+    redrawViewport,
   } = dependencies;
 
   if (typeof findNearestNodeForCanvasPixel !== 'function') {
@@ -54,6 +62,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   if (updateDistanceScaleBar !== undefined && typeof updateDistanceScaleBar !== 'function') {
     throw new Error('dependencies.updateDistanceScaleBar must be a function when provided');
   }
+  if (redrawViewport !== undefined && typeof redrawViewport !== 'function') {
+    throw new Error('dependencies.redrawViewport must be a function when provided');
+  }
 
   const incrementalRender = options.incrementalRender ?? false;
   if (typeof incrementalRender !== 'boolean') {
@@ -68,11 +79,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   let lastCompletedClientPoint = null;
   let lastCompletedNodeIndex = null;
   let idleWaiterResolvers = [];
-  const viewport = createCanvasViewportController(
-    shell,
-    mapData.graph.header,
-    updateDistanceScaleBar ?? null,
-  );
+  if (!mapData.viewport) {
+    mapData.viewport = createDefaultMapViewport();
+  }
 
   const isRoutingIdle = () =>
     activeRunToken === null && queuedNodeIndex === null && queuedClientPoint === null;
@@ -213,10 +222,15 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     if (isDisposed) {
       return;
     }
-    const { xPx, yPx } = mapClientPointToCanvasPixel(
+    const screenCanvasPixel = mapClientPointToCanvasPixel(
       shell.isochroneCanvas,
       clientX,
       clientY,
+    );
+    const { xPx, yPx } = mapScreenCanvasPixelToGraphPixel(
+      mapData.viewport,
+      screenCanvasPixel.xPx,
+      screenCanvasPixel.yPx,
     );
     if (queuedClientPoint !== null && queuedClientPoint.xPx === xPx && queuedClientPoint.yPx === yPx) {
       return;
@@ -368,7 +382,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
       const deltaX = event.clientX - activePointerGesture.lastClientX;
       const deltaY = event.clientY - activePointerGesture.lastClientY;
       activePointerGesture.dragged = true;
-      viewport.panBy(deltaX, deltaY);
+      updateViewportByClientDelta(deltaX, deltaY);
       activePointerGesture.lastClientX = event.clientX;
       activePointerGesture.lastClientY = event.clientY;
       return;
@@ -410,7 +424,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     if (typeof event.preventDefault === 'function') {
       event.preventDefault();
     }
-    viewport.zoomAt(event.clientX, event.clientY, event.deltaY);
+    zoomViewportAtClientPoint(event.clientX, event.clientY, event.deltaY);
   };
 
   const handleContextMenu = (event) => {
@@ -471,7 +485,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   return {
     dispose,
     getViewportState() {
-      return viewport.getState();
+      return { ...mapData.viewport };
     },
     runFromCanvasPixel,
     requestIsochroneRedraw,
@@ -484,16 +498,67 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
       });
     },
   };
-}
+  function updateViewportByClientDelta(deltaClientX, deltaClientY) {
+    const canvasRect = shell.isochroneCanvas.getBoundingClientRect();
+    if (!(canvasRect.width > 0) || !(canvasRect.height > 0)) {
+      return false;
+    }
+    const deltaCanvasX = (deltaClientX / canvasRect.width) * shell.isochroneCanvas.width;
+    const deltaCanvasY = (deltaClientY / canvasRect.height) * shell.isochroneCanvas.height;
+    const nextViewport = panMapViewportByCanvasDelta(
+      mapData.graph.header,
+      mapData.viewport,
+      deltaCanvasX,
+      deltaCanvasY,
+      {
+        minScale: MIN_VIEWPORT_SCALE,
+        maxScale: MAX_VIEWPORT_SCALE,
+      },
+    );
+    return applyViewport(nextViewport, { updateScaleBar: false });
+  }
 
-function clamp(value, minValue, maxValue) {
-  if (value < minValue) {
-    return minValue;
+  function zoomViewportAtClientPoint(clientX, clientY, deltaY) {
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY) || !Number.isFinite(deltaY)) {
+      return false;
+    }
+    const anchorCanvasPixel = mapClientPointToCanvasPixel(shell.isochroneCanvas, clientX, clientY);
+    const zoomFactor = Math.exp(-deltaY * WHEEL_ZOOM_SENSITIVITY);
+    const nextViewport = zoomMapViewportAtCanvasPixel(
+      mapData.graph.header,
+      mapData.viewport,
+      anchorCanvasPixel.xPx,
+      anchorCanvasPixel.yPx,
+      zoomFactor,
+      {
+        minScale: MIN_VIEWPORT_SCALE,
+        maxScale: MAX_VIEWPORT_SCALE,
+      },
+    );
+    return applyViewport(nextViewport, { updateScaleBar: true });
   }
-  if (value > maxValue) {
-    return maxValue;
+
+  function applyViewport(nextViewport, applyOptions = {}) {
+    if (!nextViewport) {
+      return false;
+    }
+    const currentViewport = mapData.viewport ?? createDefaultMapViewport();
+    if (
+      currentViewport.scale === nextViewport.scale
+      && currentViewport.offsetXPx === nextViewport.offsetXPx
+      && currentViewport.offsetYPx === nextViewport.offsetYPx
+    ) {
+      return false;
+    }
+    mapData.viewport = nextViewport;
+    if (applyOptions.updateScaleBar === true && typeof updateDistanceScaleBar === 'function') {
+      updateDistanceScaleBar(shell, mapData.graph.header, { viewport: mapData.viewport });
+    }
+    if (typeof redrawViewport === 'function') {
+      redrawViewport(shell, mapData);
+    }
+    return true;
   }
-  return value;
 }
 
 function getPointerButtonMask(button) {
@@ -517,124 +582,4 @@ function isPointerButtonPressed(event, button) {
     return (event.buttons & getPointerButtonMask(button)) !== 0;
   }
   return event.button === button;
-}
-
-function applyViewportTransform(canvasStack, state) {
-  canvasStack.style.transformOrigin = '0 0';
-  canvasStack.style.transform = `translate(${state.translateX}px, ${state.translateY}px) scale(${state.scale})`;
-}
-
-function getBaseViewportRectFromCurrentRect(currentRect, state) {
-  return {
-    left: currentRect.left - state.translateX,
-    top: currentRect.top - state.translateY,
-    width: currentRect.width / state.scale,
-    height: currentRect.height / state.scale,
-  };
-}
-
-function clampViewportTranslationForBaseRect(regionRect, baseRect, scale, translateX, translateY) {
-  let nextTranslateX = translateX;
-  let nextTranslateY = translateY;
-  const scaledWidth = baseRect.width * scale;
-  const scaledHeight = baseRect.height * scale;
-
-  if (scaledWidth <= regionRect.width) {
-    nextTranslateX = 0;
-  } else {
-    const minTranslateX = regionRect.right - baseRect.left - scaledWidth;
-    const maxTranslateX = regionRect.left - baseRect.left;
-    nextTranslateX = clamp(nextTranslateX, minTranslateX, maxTranslateX);
-  }
-
-  if (scaledHeight <= regionRect.height) {
-    nextTranslateY = 0;
-  } else {
-    const minTranslateY = regionRect.bottom - baseRect.top - scaledHeight;
-    const maxTranslateY = regionRect.top - baseRect.top;
-    nextTranslateY = clamp(nextTranslateY, minTranslateY, maxTranslateY);
-  }
-
-  return {
-    translateX: nextTranslateX,
-    translateY: nextTranslateY,
-  };
-}
-
-function createCanvasViewportController(shell, graphHeader, updateDistanceScaleBar) {
-  const state = {
-    scale: 1,
-    translateX: 0,
-    translateY: 0,
-  };
-  applyViewportTransform(shell.canvasStack, state);
-
-  return {
-    getState() {
-      return { ...state };
-    },
-    panBy(deltaX, deltaY) {
-      if (!(state.scale > MIN_VIEWPORT_SCALE)) {
-        return false;
-      }
-      const currentRect = shell.canvasStack.getBoundingClientRect();
-      const regionRect = shell.mapRegion.getBoundingClientRect();
-      const baseRect = getBaseViewportRectFromCurrentRect(currentRect, state);
-      const nextTranslation = clampViewportTranslationForBaseRect(
-        regionRect,
-        baseRect,
-        state.scale,
-        state.translateX + deltaX,
-        state.translateY + deltaY,
-      );
-      if (
-        nextTranslation.translateX === state.translateX
-        && nextTranslation.translateY === state.translateY
-      ) {
-        return false;
-      }
-      state.translateX = nextTranslation.translateX;
-      state.translateY = nextTranslation.translateY;
-      applyViewportTransform(shell.canvasStack, state);
-      return true;
-    },
-    zoomAt(clientX, clientY, deltaY) {
-      if (!Number.isFinite(clientX) || !Number.isFinite(clientY) || !Number.isFinite(deltaY)) {
-        return false;
-      }
-
-      const currentRect = shell.canvasStack.getBoundingClientRect();
-      const regionRect = shell.mapRegion.getBoundingClientRect();
-      const baseRect = getBaseViewportRectFromCurrentRect(currentRect, state);
-      const zoomFactor = Math.exp(-deltaY * WHEEL_ZOOM_SENSITIVITY);
-      const nextScale = clamp(state.scale * zoomFactor, MIN_VIEWPORT_SCALE, MAX_VIEWPORT_SCALE);
-      if (Math.abs(nextScale - state.scale) < 0.0001) {
-        return false;
-      }
-
-      const baseLeft = currentRect.left - state.translateX;
-      const baseTop = currentRect.top - state.translateY;
-      const localX = (clientX - currentRect.left) / state.scale;
-      const localY = (clientY - currentRect.top) / state.scale;
-
-      const unclampedTranslateX = clientX - baseLeft - localX * nextScale;
-      const unclampedTranslateY = clientY - baseTop - localY * nextScale;
-      const nextTranslation = clampViewportTranslationForBaseRect(
-        regionRect,
-        baseRect,
-        nextScale,
-        unclampedTranslateX,
-        unclampedTranslateY,
-      );
-      state.scale = nextScale;
-      state.translateX = nextTranslation.translateX;
-      state.translateY = nextTranslation.translateY;
-      applyViewportTransform(shell.canvasStack, state);
-
-      if (typeof updateDistanceScaleBar === 'function') {
-        updateDistanceScaleBar(shell, graphHeader);
-      }
-      return true;
-    },
-  };
 }

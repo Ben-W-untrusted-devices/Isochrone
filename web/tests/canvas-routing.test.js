@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { mapScreenCanvasPixelToGraphPixel } from '../src/core/viewport.js';
 import { bindCanvasClickRouting } from '../src/interaction/canvas-routing.js';
 
 function createEventTarget(base = {}) {
@@ -242,9 +243,10 @@ test('primary click selects origin, wheel zooms, and primary drag pans without r
 
   const routedNodeIndices = [];
   let scaleBarUpdateCount = 0;
+  let redrawViewportCount = 0;
   const binding = bindCanvasClickRouting(shell, mapData, {}, {
     findNearestNodeForCanvasPixel(_mapData, xPx) {
-      return { nodeIndex: xPx };
+      return { nodeIndex: Math.round(xPx) };
     },
     getAllowedModeMaskFromShell() {
       return 4;
@@ -267,6 +269,9 @@ test('primary click selects origin, wheel zooms, and primary drag pans without r
     setRoutingStatus() {},
     updateDistanceScaleBar() {
       scaleBarUpdateCount += 1;
+    },
+    redrawViewport() {
+      redrawViewportCount += 1;
     },
   });
 
@@ -303,6 +308,7 @@ test('primary click selects origin, wheel zooms, and primary drag pans without r
   assert.equal(wheelPrevented, true);
   assert.ok(zoomedViewport.scale > 1);
   assert.equal(scaleBarUpdateCount, 1);
+  assert.equal(redrawViewportCount, 1);
 
   const viewportBeforePan = binding.getViewportState();
   shell.isochroneCanvas.emit('pointerdown', {
@@ -333,6 +339,7 @@ test('primary click selects origin, wheel zooms, and primary drag pans without r
   assert.deepEqual(routedNodeIndices, [120]);
   const viewportAfterPan = binding.getViewportState();
   assert.notDeepEqual(viewportAfterPan, viewportBeforePan);
+  assert.equal(redrawViewportCount, 2);
 });
 
 test('secondary drag moves the selection point without panning by default', async () => {
@@ -348,9 +355,10 @@ test('secondary drag moves the selection point without panning by default', asyn
   };
 
   const routedNodeIndices = [];
+  let redrawViewportCount = 0;
   const binding = bindCanvasClickRouting(shell, mapData, {}, {
     findNearestNodeForCanvasPixel(_mapData, xPx) {
-      return { nodeIndex: xPx };
+      return { nodeIndex: Math.round(xPx) };
     },
     getAllowedModeMaskFromShell() {
       return 4;
@@ -372,6 +380,9 @@ test('secondary drag moves the selection point without panning by default', asyn
     },
     setRoutingStatus() {},
     updateDistanceScaleBar() {},
+    redrawViewport() {
+      redrawViewportCount += 1;
+    },
   });
 
   const viewportBefore = binding.getViewportState();
@@ -402,6 +413,7 @@ test('secondary drag moves the selection point without panning by default', asyn
 
   assert.deepEqual(routedNodeIndices, [205, 205]);
   assert.deepEqual(binding.getViewportState(), viewportBefore);
+  assert.equal(redrawViewportCount, 0);
 });
 
 test('invert pointer buttons swaps navigation and selection drag roles', async () => {
@@ -418,9 +430,10 @@ test('invert pointer buttons swaps navigation and selection drag roles', async (
   };
 
   const routedNodeIndices = [];
+  let redrawViewportCount = 0;
   const binding = bindCanvasClickRouting(shell, mapData, {}, {
     findNearestNodeForCanvasPixel(_mapData, xPx) {
-      return { nodeIndex: xPx };
+      return { nodeIndex: Math.round(xPx) };
     },
     getAllowedModeMaskFromShell() {
       return 4;
@@ -442,6 +455,9 @@ test('invert pointer buttons swaps navigation and selection drag roles', async (
     },
     setRoutingStatus() {},
     updateDistanceScaleBar() {},
+    redrawViewport() {
+      redrawViewportCount += 1;
+    },
   });
 
   shell.isochroneCanvas.emit('wheel', {
@@ -475,7 +491,12 @@ test('invert pointer buttons swaps navigation and selection drag roles', async (
     pointerType: 'mouse',
   });
   await flushTasks();
-  assert.deepEqual(routedNodeIndices, [180, 180]);
+  const expectedSelectionPoint = mapScreenCanvasPixelToGraphPixel(binding.getViewportState(), 180, 150);
+  assert.deepEqual(routedNodeIndices, [
+    Math.round(expectedSelectionPoint.xPx),
+    Math.round(expectedSelectionPoint.xPx),
+  ]);
+  assert.equal(redrawViewportCount, 1);
 
   const viewportBeforePan = binding.getViewportState();
   shell.isochroneCanvas.emit('pointerdown', {
@@ -503,6 +524,10 @@ test('invert pointer buttons swaps navigation and selection drag roles', async (
   });
   await flushTasks();
 
-  assert.deepEqual(routedNodeIndices, [180, 180]);
+  assert.deepEqual(routedNodeIndices, [
+    Math.round(expectedSelectionPoint.xPx),
+    Math.round(expectedSelectionPoint.xPx),
+  ]);
   assert.notDeepEqual(binding.getViewportState(), viewportBeforePan);
+  assert.equal(redrawViewportCount, 2);
 });
