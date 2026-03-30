@@ -30,7 +30,7 @@ import {
 } from './core/coords.js';
 import {
   createDefaultMapViewport,
-  normalizeMapViewport,
+  resolveViewportFrame,
 } from './core/viewport.js';
 import {
   bindHeaderMenuControl as bindHeaderMenuControlInternal,
@@ -1122,10 +1122,7 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
     'dark',
   );
   const allowedModeMask = options.allowedModeMask ?? snapshot.allowedModeMask ?? EDGE_MODE_CAR_BIT;
-  const viewport = normalizeMapViewport(
-    mapData.graph.header,
-    options.viewport ?? mapData.viewport,
-  );
+  const viewport = options.viewport ?? mapData.viewport;
 
   const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
   updateRenderBackendBadge(shell, renderer);
@@ -1161,8 +1158,8 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
           colourTheme,
           append: false,
           reuseUploadedGeometry: true,
-          widthPx: mapData.graph.header.gridWidthPx,
-          heightPx: mapData.graph.header.gridHeightPx,
+          graphWidthPx: mapData.graph.header.gridWidthPx,
+          graphHeightPx: mapData.graph.header.gridHeightPx,
           edgeSlackSeconds: EDGE_INTERPOLATION_SLACK_SECONDS,
           viewport,
         },
@@ -1178,8 +1175,8 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
       colourTheme,
       append: false,
       reuseUploadedGeometry: true,
-      widthPx: mapData.graph.header.gridWidthPx,
-      heightPx: mapData.graph.header.gridHeightPx,
+      graphWidthPx: mapData.graph.header.gridWidthPx,
+      graphHeightPx: mapData.graph.header.gridHeightPx,
       viewport,
     });
     return true;
@@ -1492,6 +1489,26 @@ function getBoundaryStrokeStyle(colourTheme) {
     : 'rgba(125, 175, 220, 0.55)';
 }
 
+function syncCanvasToDisplaySize(canvas) {
+  if (!canvas || typeof canvas.getBoundingClientRect !== 'function') {
+    return false;
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  if (!(rect.width > 0) || !(rect.height > 0)) {
+    return false;
+  }
+
+  const nextWidth = Math.max(1, Math.round(rect.width));
+  const nextHeight = Math.max(1, Math.round(rect.height));
+  const sizeChanged = canvas.width !== nextWidth || canvas.height !== nextHeight;
+  if (sizeChanged) {
+    canvas.width = nextWidth;
+    canvas.height = nextHeight;
+  }
+  return sizeChanged;
+}
+
 export function drawBoundaryBasemapAlignedToGraphGrid(
   boundaryCanvas,
   payload,
@@ -1509,24 +1526,26 @@ export function drawBoundaryBasemapAlignedToGraphGrid(
     throw new Error('Unable to get 2D context for boundary canvas');
   }
 
-  boundaryCanvas.width = graphHeader.gridWidthPx;
-  boundaryCanvas.height = graphHeader.gridHeightPx;
-  const viewport = normalizeMapViewport(graphHeader, options.viewport);
+  syncCanvasToDisplaySize(boundaryCanvas);
+  const viewportFrame = resolveViewportFrame(graphHeader, options.viewport, {
+    frameWidthPx: boundaryCanvas.width,
+    frameHeightPx: boundaryCanvas.height,
+  });
 
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.clearRect(0, 0, boundaryCanvas.width, boundaryCanvas.height);
   context.fillStyle = 'rgba(0, 0, 0, 0)';
   context.strokeStyle = getBoundaryStrokeStyle(options.colourTheme);
-  context.lineWidth = 1.2 / viewport.scale;
+  context.lineWidth = 1.2 / viewportFrame.effectiveScale;
   context.lineJoin = 'round';
   context.lineCap = 'round';
   context.setTransform(
-    viewport.scale,
+    viewportFrame.effectiveScale,
     0,
     0,
-    viewport.scale,
-    -viewport.offsetXPx * viewport.scale,
-    -viewport.offsetYPx * viewport.scale,
+    viewportFrame.effectiveScale,
+    -viewportFrame.offsetXPx * viewportFrame.effectiveScale,
+    -viewportFrame.offsetYPx * viewportFrame.effectiveScale,
   );
 
   const maxY = graphHeader.gridHeightPx - 1;
@@ -1842,11 +1861,10 @@ export async function initializeMapData(shell, options = {}) {
     const boundaryLoad = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
     const graph = await loadGraphBinary(shell, graphOptions);
     const edgeCostPrecomputeKernel = await edgeCostPrecomputeKernelPromise;
-    shell.isochroneCanvas.width = graph.header.gridWidthPx;
-    shell.isochroneCanvas.height = graph.header.gridHeightPx;
     const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
     updateRenderBackendBadge(shell, renderer);
     layoutMapViewportToContainGraph(shell, graph.header);
+    syncCanvasToDisplaySize(shell.isochroneCanvas);
     const alignedBoundarySummary = drawBoundaryBasemapAlignedToGraphGrid(
       shell.boundaryCanvas,
       boundaryLoad.boundaryPayload,
@@ -2091,14 +2109,19 @@ export function updateDistanceScaleBar(shell, graphHeader, options = {}) {
   }
 
   validateGraphHeaderForBoundaryAlignment(graphHeader);
-  const viewport = normalizeMapViewport(graphHeader, options.viewport);
   const canvasRect = shell.isochroneCanvas.getBoundingClientRect();
   if (!(canvasRect.width > 0)) {
     return;
   }
+  if (!(canvasRect.height > 0)) {
+    return;
+  }
+  const viewportFrame = resolveViewportFrame(graphHeader, options.viewport, {
+    frameWidthPx: canvasRect.width,
+    frameHeightPx: canvasRect.height,
+  });
 
-  const metresPerCssPixel =
-    ((graphHeader.gridWidthPx / viewport.scale) * graphHeader.pixelSizeM) / canvasRect.width;
+  const metresPerCssPixel = graphHeader.pixelSizeM / viewportFrame.effectiveScale;
   const preferredWidthPx = 120;
   const preferredDistanceMetres = preferredWidthPx * metresPerCssPixel;
   const chosenDistanceMetres = pickScaleDistanceMetres(preferredDistanceMetres);
@@ -2441,23 +2464,31 @@ function createCanvas2dIsochroneRenderer(canvas) {
   return {
     mode: '2d',
     draw(pixelGrid, options = {}) {
-      if (canvas.width !== pixelGrid.widthPx) {
+      if (!syncCanvasToDisplaySize(canvas) && (!(canvas.width > 0) || !(canvas.height > 0))) {
         canvas.width = pixelGrid.widthPx;
-      }
-      if (canvas.height !== pixelGrid.heightPx) {
         canvas.height = pixelGrid.heightPx;
       }
 
       const imageData = new ImageData(pixelGrid.rgba, pixelGrid.widthPx, pixelGrid.heightPx);
       context.clearRect(0, 0, canvas.width, canvas.height);
-      const viewport = normalizeMapViewport(
+      const viewportFrame = resolveViewportFrame(
         { gridWidthPx: pixelGrid.widthPx, gridHeightPx: pixelGrid.heightPx },
         options.viewport,
+        {
+          frameWidthPx: canvas.width,
+          frameHeightPx: canvas.height,
+        },
       );
       if (
         scratchCanvas
         && scratchContext
-        && (viewport.scale !== 1 || viewport.offsetXPx !== 0 || viewport.offsetYPx !== 0)
+        && (
+          viewportFrame.effectiveScale !== 1
+          || viewportFrame.offsetXPx !== 0
+          || viewportFrame.offsetYPx !== 0
+          || canvas.width !== pixelGrid.widthPx
+          || canvas.height !== pixelGrid.heightPx
+        )
       ) {
         scratchCanvas.width = pixelGrid.widthPx;
         scratchCanvas.height = pixelGrid.heightPx;
@@ -2465,10 +2496,10 @@ function createCanvas2dIsochroneRenderer(canvas) {
         context.imageSmoothingEnabled = false;
         context.drawImage(
           scratchCanvas,
-          viewport.offsetXPx,
-          viewport.offsetYPx,
-          canvas.width / viewport.scale,
-          canvas.height / viewport.scale,
+          viewportFrame.offsetXPx,
+          viewportFrame.offsetYPx,
+          viewportFrame.visibleWidthPx,
+          viewportFrame.visibleHeightPx,
           0,
           0,
           canvas.width,
@@ -2599,12 +2630,13 @@ void main(void) {
 precision mediump float;
 uniform sampler2D u_texture;
 uniform vec2 u_texture_size_px;
+uniform vec2 u_viewport_px;
 uniform vec2 u_view_offset_px;
 uniform float u_view_scale;
 in vec2 v_uv;
 out vec4 outColor;
 void main(void) {
-  vec2 screenPx = vec2(v_uv.x * u_texture_size_px.x, (1.0 - v_uv.y) * u_texture_size_px.y);
+  vec2 screenPx = vec2(v_uv.x * u_viewport_px.x, (1.0 - v_uv.y) * u_viewport_px.y);
   vec2 samplePx = u_view_offset_px + screenPx / max(u_view_scale, 1.0);
   vec2 sampleUv = samplePx / u_texture_size_px;
   if (sampleUv.x < 0.0 || sampleUv.y < 0.0 || sampleUv.x > 1.0 || sampleUv.y > 1.0) {
@@ -2616,11 +2648,12 @@ void main(void) {
     : `precision mediump float;
 uniform sampler2D u_texture;
 uniform vec2 u_texture_size_px;
+uniform vec2 u_viewport_px;
 uniform vec2 u_view_offset_px;
 uniform float u_view_scale;
 varying vec2 v_uv;
 void main(void) {
-  vec2 screenPx = vec2(v_uv.x * u_texture_size_px.x, (1.0 - v_uv.y) * u_texture_size_px.y);
+  vec2 screenPx = vec2(v_uv.x * u_viewport_px.x, (1.0 - v_uv.y) * u_viewport_px.y);
   vec2 samplePx = u_view_offset_px + screenPx / max(u_view_scale, 1.0);
   vec2 sampleUv = samplePx / u_texture_size_px;
   if (sampleUv.x < 0.0 || sampleUv.y < 0.0 || sampleUv.x > 1.0 || sampleUv.y > 1.0) {
@@ -2660,6 +2693,7 @@ void main(void) {
 
   const textureLocation = gl.getUniformLocation(program, 'u_texture');
   const textureSizeLocation = gl.getUniformLocation(program, 'u_texture_size_px');
+  const viewportSizeLocation = gl.getUniformLocation(program, 'u_viewport_px');
   const textureViewOffsetLocation = gl.getUniformLocation(program, 'u_view_offset_px');
   const textureViewScaleLocation = gl.getUniformLocation(program, 'u_view_scale');
   const bindQuadToProgram = (programToBind, positionLocationToBind) => {
@@ -2676,6 +2710,7 @@ void main(void) {
   let travelTimeCycleMinutesLocation = null;
   let travelTimeThemeVariantLocation = null;
   let travelTimeTextureSizeLocation = null;
+  let travelTimeViewportSizeLocation = null;
   let travelTimeViewOffsetLocation = null;
   let travelTimeViewScaleLocation = null;
 
@@ -2686,6 +2721,7 @@ uniform sampler2D u_time_texture;
 uniform float u_cycle_minutes;
 uniform float u_theme_variant;
 uniform vec2 u_texture_size_px;
+uniform vec2 u_viewport_px;
 uniform vec2 u_view_offset_px;
 uniform float u_view_scale;
 in vec2 v_uv;
@@ -2694,7 +2730,7 @@ out vec4 outColor;
 ${CYCLE_COLOUR_MAP_GLSL}
 
 void main(void) {
-  vec2 screenPx = vec2(v_uv.x * u_texture_size_px.x, (1.0 - v_uv.y) * u_texture_size_px.y);
+  vec2 screenPx = vec2(v_uv.x * u_viewport_px.x, (1.0 - v_uv.y) * u_viewport_px.y);
   vec2 samplePx = u_view_offset_px + screenPx / max(u_view_scale, 1.0);
   vec2 sampleUv = samplePx / u_texture_size_px;
   if (sampleUv.x < 0.0 || sampleUv.y < 0.0 || sampleUv.x > 1.0 || sampleUv.y > 1.0) {
@@ -2734,6 +2770,7 @@ void main(void) {
         travelTimeCycleMinutesLocation = gl.getUniformLocation(travelTimeProgram, 'u_cycle_minutes');
         travelTimeThemeVariantLocation = gl.getUniformLocation(travelTimeProgram, 'u_theme_variant');
         travelTimeTextureSizeLocation = gl.getUniformLocation(travelTimeProgram, 'u_texture_size_px');
+        travelTimeViewportSizeLocation = gl.getUniformLocation(travelTimeProgram, 'u_viewport_px');
         travelTimeViewOffsetLocation = gl.getUniformLocation(travelTimeProgram, 'u_view_offset_px');
         travelTimeViewScaleLocation = gl.getUniformLocation(travelTimeProgram, 'u_view_scale');
       }
@@ -3082,18 +3119,23 @@ void main(void) {
     return { width, height };
   };
 
-  const resolveRendererViewport = (widthPx, heightPx, viewport) =>
-    normalizeMapViewport(
+  const resolveRendererViewport = (graphWidthPx, graphHeightPx, viewport) =>
+    resolveViewportFrame(
       {
-        gridWidthPx: widthPx,
-        gridHeightPx: heightPx,
+        gridWidthPx: graphWidthPx,
+        gridHeightPx: graphHeightPx,
       },
       viewport,
+      {
+        frameWidthPx: canvas.width,
+        frameHeightPx: canvas.height,
+      },
     );
 
   const renderer = {
     mode: 'webgl',
     clear(options = {}) {
+      syncCanvasToDisplaySize(canvas);
       const targetWidthPx = options.widthPx ?? canvas.width;
       const targetHeightPx = options.heightPx ?? canvas.height;
       if (!Number.isFinite(targetWidthPx) || targetWidthPx <= 0) {
@@ -3118,10 +3160,8 @@ void main(void) {
     },
     draw(pixelGrid, options = {}) {
       validatePixelGrid(pixelGrid);
-      if (canvas.width !== pixelGrid.widthPx) {
+      if (!syncCanvasToDisplaySize(canvas) && (!(canvas.width > 0) || !(canvas.height > 0))) {
         canvas.width = pixelGrid.widthPx;
-      }
-      if (canvas.height !== pixelGrid.heightPx) {
         canvas.height = pixelGrid.heightPx;
       }
 
@@ -3147,11 +3187,14 @@ void main(void) {
       if (textureSizeLocation !== null) {
         gl.uniform2f(textureSizeLocation, pixelGrid.widthPx, pixelGrid.heightPx);
       }
+      if (viewportSizeLocation !== null) {
+        gl.uniform2f(viewportSizeLocation, canvas.width, canvas.height);
+      }
       if (textureViewOffsetLocation !== null) {
         gl.uniform2f(textureViewOffsetLocation, viewport.offsetXPx, viewport.offsetYPx);
       }
       if (textureViewScaleLocation !== null) {
-        gl.uniform1f(textureViewScaleLocation, viewport.scale);
+        gl.uniform1f(textureViewScaleLocation, viewport.effectiveScale);
       }
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
@@ -3179,22 +3222,15 @@ void main(void) {
       const alpha = Number.isFinite(options.alpha) ? options.alpha : 1;
       const clampedAlpha = Math.max(0, Math.min(1, alpha));
       const reuseUploadedGeometry = options.reuseUploadedGeometry === true;
-      const targetWidthPx = options.widthPx ?? canvas.width;
-      const targetHeightPx = options.heightPx ?? canvas.height;
-      if (!Number.isFinite(targetWidthPx) || targetWidthPx <= 0) {
-        throw new Error('options.widthPx (or canvas.width) must be positive');
+      if (!syncCanvasToDisplaySize(canvas) && (!(canvas.width > 0) || !(canvas.height > 0))) {
+        const fallbackWidthPx = options.graphWidthPx ?? canvas.width;
+        const fallbackHeightPx = options.graphHeightPx ?? canvas.height;
+        canvas.width = Math.max(1, Math.floor(fallbackWidthPx));
+        canvas.height = Math.max(1, Math.floor(fallbackHeightPx));
       }
-      if (!Number.isFinite(targetHeightPx) || targetHeightPx <= 0) {
-        throw new Error('options.heightPx (or canvas.height) must be positive');
-      }
-      const viewport = resolveRendererViewport(targetWidthPx, targetHeightPx, options.viewport);
-
-      if (canvas.width !== targetWidthPx) {
-        canvas.width = Math.floor(targetWidthPx);
-      }
-      if (canvas.height !== targetHeightPx) {
-        canvas.height = Math.floor(targetHeightPx);
-      }
+      const graphWidthPx = options.graphWidthPx ?? canvas.width;
+      const graphHeightPx = options.graphHeightPx ?? canvas.height;
+      const viewport = resolveRendererViewport(graphWidthPx, graphHeightPx, options.viewport);
 
       gl.viewport(0, 0, canvas.width, canvas.height);
       if (!append) {
@@ -3229,7 +3265,7 @@ void main(void) {
         gl.uniform2f(edgeViewOffsetLocation, viewport.offsetXPx, viewport.offsetYPx);
       }
       if (edgeViewScaleLocation !== null) {
-        gl.uniform1f(edgeViewScaleLocation, viewport.scale);
+        gl.uniform1f(edgeViewScaleLocation, viewport.effectiveScale);
       }
       if (edgeCycleMinutesLocation !== null) {
         gl.uniform1f(edgeCycleMinutesLocation, cycleMinutes);
@@ -3283,22 +3319,15 @@ void main(void) {
         throw new Error('options.edgeSlackSeconds must be a non-negative finite number');
       }
       const reuseUploadedGeometry = options.reuseUploadedGeometry === true;
-      const targetWidthPx = options.widthPx ?? canvas.width;
-      const targetHeightPx = options.heightPx ?? canvas.height;
-      if (!Number.isFinite(targetWidthPx) || targetWidthPx <= 0) {
-        throw new Error('options.widthPx (or canvas.width) must be positive');
+      if (!syncCanvasToDisplaySize(canvas) && (!(canvas.width > 0) || !(canvas.height > 0))) {
+        const fallbackWidthPx = options.graphWidthPx ?? canvas.width;
+        const fallbackHeightPx = options.graphHeightPx ?? canvas.height;
+        canvas.width = Math.max(1, Math.floor(fallbackWidthPx));
+        canvas.height = Math.max(1, Math.floor(fallbackHeightPx));
       }
-      if (!Number.isFinite(targetHeightPx) || targetHeightPx <= 0) {
-        throw new Error('options.heightPx (or canvas.height) must be positive');
-      }
-      const viewport = resolveRendererViewport(targetWidthPx, targetHeightPx, options.viewport);
-
-      if (canvas.width !== targetWidthPx) {
-        canvas.width = Math.floor(targetWidthPx);
-      }
-      if (canvas.height !== targetHeightPx) {
-        canvas.height = Math.floor(targetHeightPx);
-      }
+      const graphWidthPx = options.graphWidthPx ?? canvas.width;
+      const graphHeightPx = options.graphHeightPx ?? canvas.height;
+      const viewport = resolveRendererViewport(graphWidthPx, graphHeightPx, options.viewport);
 
       gl.viewport(0, 0, canvas.width, canvas.height);
       if (!append) {
@@ -3352,7 +3381,7 @@ void main(void) {
         gl.uniform2f(indexedEdgeViewOffsetLocation, viewport.offsetXPx, viewport.offsetYPx);
       }
       if (indexedEdgeViewScaleLocation !== null) {
-        gl.uniform1f(indexedEdgeViewScaleLocation, viewport.scale);
+        gl.uniform1f(indexedEdgeViewScaleLocation, viewport.effectiveScale);
       }
       if (indexedEdgeCycleMinutesLocation !== null) {
         gl.uniform1f(indexedEdgeCycleMinutesLocation, cycleMinutes);
@@ -3410,10 +3439,8 @@ void main(void) {
     renderer.drawTravelTimeGrid = function drawTravelTimeGrid(travelTimeGrid, options = {}) {
       validateTravelTimeGrid(travelTimeGrid);
 
-      if (canvas.width !== travelTimeGrid.widthPx) {
+      if (!syncCanvasToDisplaySize(canvas) && (!(canvas.width > 0) || !(canvas.height > 0))) {
         canvas.width = travelTimeGrid.widthPx;
-      }
-      if (canvas.height !== travelTimeGrid.heightPx) {
         canvas.height = travelTimeGrid.heightPx;
       }
 
@@ -3445,11 +3472,14 @@ void main(void) {
       if (travelTimeTextureSizeLocation !== null) {
         gl.uniform2f(travelTimeTextureSizeLocation, travelTimeGrid.widthPx, travelTimeGrid.heightPx);
       }
+      if (travelTimeViewportSizeLocation !== null) {
+        gl.uniform2f(travelTimeViewportSizeLocation, canvas.width, canvas.height);
+      }
       if (travelTimeViewOffsetLocation !== null) {
         gl.uniform2f(travelTimeViewOffsetLocation, viewport.offsetXPx, viewport.offsetYPx);
       }
       if (travelTimeViewScaleLocation !== null) {
-        gl.uniform1f(travelTimeViewScaleLocation, viewport.scale);
+        gl.uniform1f(travelTimeViewScaleLocation, viewport.effectiveScale);
       }
       if (travelTimeCycleMinutesLocation !== null) {
         gl.uniform1f(travelTimeCycleMinutesLocation, cycleMinutes);
@@ -4251,7 +4281,6 @@ function renderInitialPassByBackend(renderContext) {
     renderer,
     shell,
     mapData,
-    searchState,
     viewport,
   } = renderContext;
   if (!incrementalRender) {
@@ -4259,10 +4288,7 @@ function renderInitialPassByBackend(renderContext) {
   }
 
   if (supportsGpuEdgeInterpolation) {
-    renderer.clear({
-      widthPx: searchState.graph.header.gridWidthPx,
-      heightPx: searchState.graph.header.gridHeightPx,
-    });
+    renderer.clear();
   } else if (supportsGpuTravelTimeRendering) {
     clearTravelTimeGrid(mapData.travelTimeGrid);
     renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
@@ -4319,8 +4345,8 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
         cycleMinutes: colourCycleMinutes,
         colourTheme,
         append: true,
-        widthPx: searchState.graph.header.gridWidthPx,
-        heightPx: searchState.graph.header.gridHeightPx,
+        graphWidthPx: searchState.graph.header.gridWidthPx,
+        graphHeightPx: searchState.graph.header.gridHeightPx,
         viewport,
       }),
     );
@@ -4430,8 +4456,8 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
             colourTheme,
             append: false,
             reuseUploadedGeometry: true,
-            widthPx: searchState.graph.header.gridWidthPx,
-            heightPx: searchState.graph.header.gridHeightPx,
+            graphWidthPx: searchState.graph.header.gridWidthPx,
+            graphHeightPx: searchState.graph.header.gridHeightPx,
             edgeSlackSeconds: EDGE_INTERPOLATION_SLACK_SECONDS,
             viewport,
           },
@@ -4462,8 +4488,8 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
           cycleMinutes: colourCycleMinutes,
           colourTheme,
           append: false,
-          widthPx: searchState.graph.header.gridWidthPx,
-          heightPx: searchState.graph.header.gridHeightPx,
+          graphWidthPx: searchState.graph.header.gridWidthPx,
+          graphHeightPx: searchState.graph.header.gridHeightPx,
           viewport,
         }),
       );
@@ -4659,7 +4685,7 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
     interactiveEdgeStepStride,
     finalEdgeStepStride,
     alpha,
-    viewport: normalizeMapViewport(mapData.graph.header, options.viewport ?? mapData.viewport),
+    viewport: options.viewport ?? mapData.viewport,
   };
 
   profileMs('initialPassMs', () => {
@@ -5490,6 +5516,22 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
       .then((mapData) => {
         initializedMapData = mapData;
         window.addEventListener('resize', () => {
+          if (mapData.boundaryPayload) {
+            drawBoundaryBasemapAlignedToGraphGrid(
+              shell.boundaryCanvas,
+              mapData.boundaryPayload,
+              mapData.graph.header,
+              {
+                colourTheme: resolveIsochroneTheme(),
+                viewport: mapData.viewport,
+              },
+            );
+          }
+          rerenderIsochroneFromSnapshot(shell, mapData, {
+            colourTheme: resolveIsochroneTheme(),
+            colourCycleMinutes: getColourCycleMinutesFromShell(shell),
+            viewport: mapData.viewport,
+          });
           updateDistanceScaleBar(shell, mapData.graph.header, { viewport: mapData.viewport });
         });
         routingBinding = bindCanvasClickRouting(shell, mapData);

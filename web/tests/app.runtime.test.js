@@ -26,6 +26,7 @@ import {
   getOrBuildEdgeTraversalCostTicksForMode,
   getOrRotateRoutingDistScratchBuffer,
   buildModeSpecificKernelGraphViews,
+  drawBoundaryBasemapAlignedToGraphGrid,
   buildStaticEdgeNodeIndexedVertexData,
   layoutMapViewportToContainGraph,
   rerenderIsochroneFromSnapshotWithStatus,
@@ -542,7 +543,7 @@ test('updateDistanceScaleBar sets distance-aligned segment width for patterned b
     distanceScaleLabel: { textContent: '' },
     isochroneCanvas: {
       getBoundingClientRect() {
-        return { width: 1000 };
+        return { width: 1000, height: 500 };
       },
     },
   };
@@ -574,7 +575,7 @@ test('updateDistanceScaleBar reflects zoomed viewport scale', () => {
     distanceScaleLabel: { textContent: '' },
     isochroneCanvas: {
       getBoundingClientRect() {
-        return { width: 1000 };
+        return { width: 1000, height: 500 };
       },
     },
   };
@@ -636,6 +637,79 @@ test('layoutMapViewportToContainGraph clears legacy contained-layout sizing', ()
   assert.equal(style.aspectRatio, '');
   assert.equal(style.transform, '');
   assert.equal(style.transformOrigin, '');
+});
+
+test('drawBoundaryBasemapAlignedToGraphGrid sizes canvas to display frame and preserves equal x/y scale', () => {
+  const transformCalls = [];
+  const context = {
+    fillStyle: '',
+    strokeStyle: '',
+    lineWidth: 0,
+    lineJoin: '',
+    lineCap: '',
+    beginPath() {},
+    moveTo() {},
+    lineTo() {},
+    closePath() {},
+    fill() {},
+    stroke() {},
+    clearRect() {},
+    setTransform(...args) {
+      transformCalls.push(args);
+    },
+  };
+  const boundaryCanvas = {
+    width: 0,
+    height: 0,
+    getBoundingClientRect() {
+      return { width: 800, height: 300 };
+    },
+    getContext(kind) {
+      assert.equal(kind, '2d');
+      return context;
+    },
+  };
+  const graphHeader = {
+    originEasting: 0,
+    originNorthing: 0,
+    gridWidthPx: 400,
+    gridHeightPx: 300,
+    pixelSizeM: 1,
+  };
+  const payload = {
+    coordinate_space: {
+      width: 400,
+      height: 300,
+      x_origin: 0,
+      y_origin: 299,
+      axis: 'x-right-y-down',
+    },
+    features: [
+      {
+        name: 'frame',
+        paths: [
+          [
+            [0, 0],
+            [399, 0],
+            [399, 299],
+            [0, 299],
+            [0, 0],
+          ],
+        ],
+      },
+    ],
+  };
+
+  drawBoundaryBasemapAlignedToGraphGrid(boundaryCanvas, payload, graphHeader);
+
+  assert.equal(boundaryCanvas.width, 800);
+  assert.equal(boundaryCanvas.height, 300);
+  assert.deepEqual(transformCalls[0], [1, 0, 0, 1, 0, 0]);
+  assert.deepEqual(
+    transformCalls[1].map((value) => (Object.is(value, -0) ? 0 : value)),
+    [1, 0, 0, 1, 200, 0],
+  );
+  assert.equal(context.lineWidth, 1.2);
 });
 
 test('parseNodeIndexFromLocationSearch validates and clamps invalid params', () => {

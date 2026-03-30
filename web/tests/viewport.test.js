@@ -5,6 +5,7 @@ import {
   createDefaultMapViewport,
   mapScreenCanvasPixelToGraphPixel,
   panMapViewportByCanvasDelta,
+  resolveViewportFrame,
   zoomMapViewportAtCanvasPixel,
 } from '../src/core/viewport.js';
 
@@ -28,9 +29,17 @@ test('zoomMapViewportAtCanvasPixel keeps the anchor point fixed in graph space',
     anchorCanvasX,
     anchorCanvasY,
     2,
+    {
+      frameWidthPx: 400,
+      frameHeightPx: 300,
+    },
   );
+  const zoomedFrame = resolveViewportFrame(graphHeader, zoomedViewport, {
+    frameWidthPx: 400,
+    frameHeightPx: 300,
+  });
   const anchorAfter = mapScreenCanvasPixelToGraphPixel(
-    zoomedViewport,
+    zoomedFrame,
     anchorCanvasX,
     anchorCanvasY,
   );
@@ -52,17 +61,64 @@ test('panMapViewportByCanvasDelta follows grab direction and clamps to graph bou
     offsetYPx: 60,
   };
 
-  const pannedViewport = panMapViewportByCanvasDelta(graphHeader, viewport, 40, 20);
+  const pannedViewport = panMapViewportByCanvasDelta(graphHeader, viewport, 40, 20, {
+    frameWidthPx: 400,
+    frameHeightPx: 300,
+  });
   assert.deepEqual(pannedViewport, {
     scale: 2,
     offsetXPx: 60,
     offsetYPx: 50,
   });
 
-  const clampedViewport = panMapViewportByCanvasDelta(graphHeader, viewport, -1000, -1000);
+  const clampedViewport = panMapViewportByCanvasDelta(graphHeader, viewport, -1000, -1000, {
+    frameWidthPx: 400,
+    frameHeightPx: 300,
+  });
   assert.deepEqual(clampedViewport, {
     scale: 2,
     offsetXPx: 200,
     offsetYPx: 150,
   });
+});
+
+test('resolveViewportFrame centers the graph inside a wider display frame and preserves center-anchor zoom', () => {
+  const graphHeader = createGraphHeader();
+  const frame = resolveViewportFrame(graphHeader, createDefaultMapViewport(), {
+    frameWidthPx: 800,
+    frameHeightPx: 300,
+  });
+
+  assert.equal(frame.fitScale, 1);
+  assert.equal(frame.effectiveScale, 1);
+  assert.equal(frame.offsetXPx, -200);
+  assert.equal(Object.is(frame.offsetYPx, -0) ? 0 : frame.offsetYPx, 0);
+
+  const anchorCanvasX = 400;
+  const anchorCanvasY = 150;
+  const anchorBefore = mapScreenCanvasPixelToGraphPixel(frame, anchorCanvasX, anchorCanvasY);
+  assert.equal(anchorBefore.xPx, 200);
+  assert.equal(anchorBefore.yPx, 150);
+
+  const zoomedViewport = zoomMapViewportAtCanvasPixel(
+    graphHeader,
+    createDefaultMapViewport(),
+    anchorCanvasX,
+    anchorCanvasY,
+    2,
+    {
+      frameWidthPx: 800,
+      frameHeightPx: 300,
+    },
+  );
+  const zoomedFrame = resolveViewportFrame(graphHeader, zoomedViewport, {
+    frameWidthPx: 800,
+    frameHeightPx: 300,
+  });
+  const anchorAfter = mapScreenCanvasPixelToGraphPixel(zoomedFrame, anchorCanvasX, anchorCanvasY);
+
+  assert.equal(anchorAfter.xPx, anchorBefore.xPx);
+  assert.equal(anchorAfter.yPx, anchorBefore.yPx);
+  assert.equal(zoomedFrame.effectiveScale, 2);
+  assert.equal(zoomedFrame.offsetXPx, 0);
 });

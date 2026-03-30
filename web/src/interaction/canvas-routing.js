@@ -2,6 +2,7 @@ import {
   createDefaultMapViewport,
   mapScreenCanvasPixelToGraphPixel,
   panMapViewportByCanvasDelta,
+  resolveViewportFrame,
   zoomMapViewportAtCanvasPixel,
 } from '../core/viewport.js';
 
@@ -231,8 +232,12 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
       clientX,
       clientY,
     );
+    const viewportFrame = resolveViewportFrame(mapData.graph.header, mapData.viewport, {
+      frameWidthPx: shell.isochroneCanvas.width,
+      frameHeightPx: shell.isochroneCanvas.height,
+    });
     const { xPx, yPx } = mapScreenCanvasPixelToGraphPixel(
-      mapData.viewport,
+      viewportFrame,
       screenCanvasPixel.xPx,
       screenCanvasPixel.yPx,
     );
@@ -515,6 +520,8 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
       deltaCanvasX,
       deltaCanvasY,
       {
+        frameWidthPx: shell.isochroneCanvas.width,
+        frameHeightPx: shell.isochroneCanvas.height,
         minScale: MIN_VIEWPORT_SCALE,
         maxScale: MAX_VIEWPORT_SCALE,
       },
@@ -535,6 +542,8 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
       anchorCanvasPixel.yPx,
       zoomFactor,
       {
+        frameWidthPx: shell.isochroneCanvas.width,
+        frameHeightPx: shell.isochroneCanvas.height,
         minScale: MIN_VIEWPORT_SCALE,
         maxScale: MAX_VIEWPORT_SCALE,
       },
