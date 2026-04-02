@@ -72,8 +72,12 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   }
 
   const incrementalRender = options.incrementalRender ?? false;
+  const autoStartFromLocation = options.autoStartFromLocation ?? true;
   if (typeof incrementalRender !== 'boolean') {
     throw new Error('options.incrementalRender must be a boolean when provided');
+  }
+  if (typeof autoStartFromLocation !== 'boolean') {
+    throw new Error('options.autoStartFromLocation must be a boolean when provided');
   }
 
   let activeRunToken = null;
@@ -454,16 +458,18 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   shell.isochroneCanvas.addEventListener('wheel', handleWheel, { passive: false });
   shell.isochroneCanvas.addEventListener('contextmenu', handleContextMenu);
 
-  const initialNodeIndex = parseNodeIndexFromLocationSearch(
-    globalThis.location?.search ?? '',
-    mapData.graph.header.nNodes,
-  );
-  if (initialNodeIndex !== null) {
-    const allowedModeMask = getAllowedModeMaskFromShell(shell);
-    void runFromNodeIndex(initialNodeIndex, allowedModeMask).catch((error) => {
-      setRoutingStatus(shell, getRoutingFailedStatusText?.(shell) ?? 'Routing failed.');
-      console.error(error);
-    });
+  if (autoStartFromLocation) {
+    const initialNodeIndex = parseNodeIndexFromLocationSearch(
+      globalThis.location?.search ?? '',
+      mapData.graph.header.nNodes,
+    );
+    if (initialNodeIndex !== null) {
+      const allowedModeMask = getAllowedModeMaskFromShell(shell);
+      void runFromNodeIndex(initialNodeIndex, allowedModeMask).catch((error) => {
+        setRoutingStatus(shell, getRoutingFailedStatusText?.(shell) ?? 'Routing failed.');
+        console.error(error);
+      });
+    }
   }
 
   const dispose = () => {

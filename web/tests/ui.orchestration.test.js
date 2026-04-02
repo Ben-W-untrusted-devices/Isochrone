@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  bindLocationSelectControl,
   bindHeaderMenuControl,
   bindModeSelectControl,
   bindPointerButtonInversionControl,
   bindThemeControl,
-  setLocationTitleText,
+  populateLocationSelect,
 } from '../src/ui/orchestration.js';
 
 function createEventTarget() {
@@ -64,6 +65,34 @@ function createThemeSelect(initialValue = 'light') {
   return {
     ...eventTarget,
     value: initialValue,
+  };
+}
+
+function createLocationSelect(initialValue = '') {
+  const eventTarget = createEventTarget();
+  const optionElements = [];
+  return {
+    ...eventTarget,
+    tagName: 'SELECT',
+    value: initialValue,
+    disabled: false,
+    ownerDocument: {
+      createElement(tagName) {
+        assert.equal(tagName, 'option');
+        return {
+          tagName: 'OPTION',
+          value: '',
+          textContent: '',
+        };
+      },
+    },
+    replaceChildren(...children) {
+      optionElements.length = 0;
+      optionElements.push(...children);
+    },
+    get options() {
+      return optionElements;
+    },
   };
 }
 
@@ -185,17 +214,48 @@ test('bindModeSelectControl falls back to redraw when cycle repaint is unavailab
 });
 
 
-test('setLocationTitleText updates the header location label', () => {
-  const locationTitle = {
-    textContent: 'Berlin',
-  };
-  const shell = { locationTitle };
+test('populateLocationSelect replaces options and selects the requested location', () => {
+  const locationSelect = createLocationSelect();
+  const shell = { locationSelect };
 
-  setLocationTitleText(shell, 'Paris');
-  assert.equal(locationTitle.textContent, 'Paris');
+  const selectedLocationId = populateLocationSelect(
+    shell,
+    [
+      { id: 'berlin', name: 'Berlin' },
+      { id: 'paris', name: 'Paris' },
+    ],
+    'paris',
+  );
 
-  setLocationTitleText(shell, '   ');
-  assert.equal(locationTitle.textContent, '');
+  assert.equal(selectedLocationId, 'paris');
+  assert.equal(locationSelect.value, 'paris');
+  assert.deepEqual(
+    locationSelect.options.map((option) => ({ value: option.value, textContent: option.textContent })),
+    [
+      { value: 'berlin', textContent: 'Berlin' },
+      { value: 'paris', textContent: 'Paris' },
+    ],
+  );
+});
+
+test('bindLocationSelectControl notifies when the selected location changes', () => {
+  const locationSelect = createLocationSelect('berlin');
+  const shell = { locationSelect };
+  const changedLocationIds = [];
+  const binding = bindLocationSelectControl(shell, {
+    onLocationChange(locationId) {
+      changedLocationIds.push(locationId);
+    },
+  });
+
+  locationSelect.value = 'paris';
+  locationSelect.emit('change');
+  assert.deepEqual(changedLocationIds, ['paris']);
+
+  binding.dispose();
+  locationSelect.value = 'berlin';
+  locationSelect.emit('change');
+  assert.deepEqual(changedLocationIds, ['paris']);
 });
 
 test('bindThemeControl restores persisted theme and persists changes', () => {

@@ -1,5 +1,9 @@
 import {
-  DEFAULT_LOCATION_FILE_NAME,
+  DEFAULT_BOUNDARY_BASEMAP_URL,
+  DEFAULT_BOUNDARY_FILE_NAME,
+  DEFAULT_GRAPH_BINARY_URL,
+  DEFAULT_GRAPH_FILE_NAME,
+  DEFAULT_LOCATION_ID,
   DEFAULT_LOCATION_NAME,
   DEFAULT_LOCATION_REGISTRY_URL,
 } from '../config/constants.js';
@@ -15,8 +19,10 @@ export function createDefaultLocationRegistry() {
   return {
     locations: [
       {
+        id: DEFAULT_LOCATION_ID,
         name: DEFAULT_LOCATION_NAME,
-        fileName: DEFAULT_LOCATION_FILE_NAME,
+        graphFileName: DEFAULT_GRAPH_FILE_NAME,
+        boundaryFileName: DEFAULT_BOUNDARY_FILE_NAME,
       },
     ],
   };
@@ -28,15 +34,23 @@ export function parseLocationRegistry(payload) {
     throw new Error('location registry must contain a non-empty locations array');
   }
 
-  const seenFileNames = new Set();
+  const seenLocationIds = new Set();
   const normalizedLocations = locations.map((entry, index) => {
+    const id = normalizeNonEmptyString(entry?.id, `locations[${index}].id`);
     const name = normalizeNonEmptyString(entry?.name, `locations[${index}].name`);
-    const fileName = normalizeNonEmptyString(entry?.fileName, `locations[${index}].fileName`);
-    if (seenFileNames.has(fileName)) {
-      throw new Error(`duplicate location fileName: ${fileName}`);
+    const graphFileName = normalizeNonEmptyString(
+      entry?.graphFileName,
+      `locations[${index}].graphFileName`,
+    );
+    const boundaryFileName = normalizeNonEmptyString(
+      entry?.boundaryFileName,
+      `locations[${index}].boundaryFileName`,
+    );
+    if (seenLocationIds.has(id)) {
+      throw new Error(`duplicate location id: ${id}`);
     }
-    seenFileNames.add(fileName);
-    return { name, fileName };
+    seenLocationIds.add(id);
+    return { id, name, graphFileName, boundaryFileName };
   });
 
   return {
@@ -44,26 +58,44 @@ export function parseLocationRegistry(payload) {
   };
 }
 
-export function findLocationByFileName(registry, fileName) {
+export function findLocationById(registry, locationId) {
   if (!registry || typeof registry !== 'object') {
     return null;
   }
-  const normalizedFileName =
-    typeof fileName === 'string' && fileName.trim().length > 0
-      ? fileName.trim()
+  const normalizedLocationId =
+    typeof locationId === 'string' && locationId.trim().length > 0
+      ? locationId.trim()
       : '';
-  if (normalizedFileName.length === 0) {
+  if (normalizedLocationId.length === 0) {
     return null;
   }
-  return registry.locations?.find((entry) => entry.fileName === normalizedFileName) ?? null;
+  return registry.locations?.find((entry) => entry.id === normalizedLocationId) ?? null;
 }
 
-export function resolveLocationName(registry, fileName, fallbackName = DEFAULT_LOCATION_NAME) {
-  const match = findLocationByFileName(registry, fileName);
-  if (match?.name) {
-    return match.name;
+export function resolveLocationEntry(registry, locationId, fallbackLocationId = DEFAULT_LOCATION_ID) {
+  const directMatch = findLocationById(registry, locationId);
+  if (directMatch) {
+    return directMatch;
   }
-  return typeof fallbackName === 'string' ? fallbackName.trim() : '';
+  const fallbackMatch = findLocationById(registry, fallbackLocationId);
+  if (fallbackMatch) {
+    return fallbackMatch;
+  }
+  return registry?.locations?.[0] ?? null;
+}
+
+export function buildLocationAssetUrls(locationEntry) {
+  if (!locationEntry || typeof locationEntry !== 'object') {
+    return {
+      graphUrl: DEFAULT_GRAPH_BINARY_URL,
+      boundaryUrl: DEFAULT_BOUNDARY_BASEMAP_URL,
+    };
+  }
+  return {
+    graphUrl: `../data_pipeline/output/${locationEntry.graphFileName ?? DEFAULT_GRAPH_FILE_NAME}`,
+    boundaryUrl:
+      `../data_pipeline/output/${locationEntry.boundaryFileName ?? DEFAULT_BOUNDARY_FILE_NAME}`,
+  };
 }
 
 export async function loadLocationRegistry(options = {}) {

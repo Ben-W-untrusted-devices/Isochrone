@@ -33,7 +33,7 @@ export function initializeAppShell(doc, options = {}) {
   const canvasStack = resolvedDocument.getElementById('canvas-stack');
   const controlsMenu = resolvedDocument.getElementById('controls-menu');
   const controlsMenuSummary = resolvedDocument.getElementById('controls-menu-summary');
-  const locationTitle = resolvedDocument.getElementById('location-title');
+  const locationSelect = resolvedDocument.getElementById('location-select');
   const loadingOverlay = resolvedDocument.getElementById('loading');
   const loadingText = resolvedDocument.getElementById('loading-text');
   const loadingProgressBar = resolvedDocument.getElementById('loading-progress-bar');
@@ -68,8 +68,8 @@ export function initializeAppShell(doc, options = {}) {
   if (!controlsMenuSummary || controlsMenuSummary.tagName !== 'SUMMARY') {
     throw new Error('index.html is missing <summary id="controls-menu-summary">');
   }
-  if (!locationTitle || locationTitle.tagName !== 'SPAN') {
-    throw new Error('index.html is missing <span id="location-title">');
+  if (!locationSelect || locationSelect.tagName !== 'SELECT') {
+    throw new Error('index.html is missing <select id="location-select">');
   }
   if (!loadingOverlay || loadingOverlay.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="loading">');
@@ -162,7 +162,7 @@ export function initializeAppShell(doc, options = {}) {
     canvasStack,
     controlsMenu,
     controlsMenuSummary,
-    locationTitle,
+    locationSelect,
     loadingOverlay,
     loadingText,
     loadingProgressBar,
@@ -185,17 +185,52 @@ export function initializeAppShell(doc, options = {}) {
   };
 }
 
-export function setLocationTitleText(shell, locationName) {
-  if (!shell || typeof shell !== 'object' || !shell.locationTitle) {
-    throw new Error('shell.locationTitle is required');
+export function populateLocationSelect(shell, locations, selectedLocationId = '') {
+  if (!shell || typeof shell !== 'object' || !shell.locationSelect) {
+    throw new Error('shell.locationSelect is required');
+  }
+  if (!Array.isArray(locations) || locations.length === 0) {
+    throw new Error('locations must be a non-empty array');
+  }
+  if (
+    !shell.locationSelect.ownerDocument
+    || typeof shell.locationSelect.ownerDocument.createElement !== 'function'
+    || typeof shell.locationSelect.replaceChildren !== 'function'
+  ) {
+    throw new Error('shell.locationSelect must support DOM option creation');
   }
 
-  const normalizedLocationName =
-    typeof locationName === 'string' && locationName.trim().length > 0
-      ? locationName.trim()
-      : '';
-  shell.locationTitle.textContent = normalizedLocationName;
-  return normalizedLocationName;
+  const optionElements = locations.map((location) => {
+    const option = shell.locationSelect.ownerDocument.createElement('option');
+    option.value = location.id;
+    option.textContent = location.name;
+    return option;
+  });
+  shell.locationSelect.replaceChildren(...optionElements);
+  const hasSelectedLocationId = locations.some((location) => location.id === selectedLocationId);
+  shell.locationSelect.value = hasSelectedLocationId ? selectedLocationId : locations[0].id;
+  return shell.locationSelect.value;
+}
+
+export function bindLocationSelectControl(shell, options = {}) {
+  if (!shell || typeof shell !== 'object' || !shell.locationSelect) {
+    throw new Error('shell.locationSelect is required');
+  }
+  const onLocationChange = options.onLocationChange ?? null;
+  if (typeof onLocationChange !== 'function') {
+    throw new Error('options.onLocationChange must be a function');
+  }
+
+  const handleChange = () => {
+    onLocationChange(shell.locationSelect.value);
+  };
+  shell.locationSelect.addEventListener('change', handleChange);
+
+  return {
+    dispose() {
+      shell.locationSelect.removeEventListener('change', handleChange);
+    },
+  };
 }
 
 export function bindPointerButtonInversionControl(shell, options = {}) {

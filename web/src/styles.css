@@ -127,15 +127,23 @@ body {
   color: var(--chrome-text);
 }
 
-.app-location-title {
+.app-location-select {
   min-width: 0;
+  max-width: min(18rem, 40vw);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 1.1rem;
   line-height: 1.2;
   font-weight: 700;
+  font-family: inherit;
   color: var(--chrome-text);
+  background: transparent;
+  border: 1px solid var(--control-border);
+  border-radius: 0.35rem;
+  padding: 0.18rem 1.9rem 0.18rem 0.45rem;
+  appearance: auto;
+  cursor: pointer;
 }
 
 .controls-menu {

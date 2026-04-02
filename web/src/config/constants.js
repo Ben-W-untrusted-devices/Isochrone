@@ -1,8 +1,10 @@
+export const DEFAULT_BOUNDARY_FILE_NAME = 'berlin-district-boundaries-canvas.json';
+export const DEFAULT_GRAPH_FILE_NAME = 'graph-walk.bin.gz';
 export const DEFAULT_BOUNDARY_BASEMAP_URL =
-  '../data_pipeline/output/berlin-district-boundaries-canvas.json';
-export const DEFAULT_GRAPH_BINARY_URL = '../data_pipeline/output/graph-walk.bin.gz';
+  `../data_pipeline/output/${DEFAULT_BOUNDARY_FILE_NAME}`;
+export const DEFAULT_GRAPH_BINARY_URL = `../data_pipeline/output/${DEFAULT_GRAPH_FILE_NAME}`;
 export const DEFAULT_LOCATION_NAME = 'Berlin';
-export const DEFAULT_LOCATION_FILE_NAME = 'berlin';
+export const DEFAULT_LOCATION_ID = 'berlin';
 export const DEFAULT_LOCATION_REGISTRY_URL = '../data/locations.json';
 export const GRAPH_MAGIC = 0x49534f43;
 

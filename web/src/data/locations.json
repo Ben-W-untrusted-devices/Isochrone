@@ -1,8 +1,10 @@
 {
   "locations": [
     {
+      "id": "berlin",
       "name": "Berlin",
-      "fileName": "berlin"
+      "graphFileName": "graph-walk.bin.gz",
+      "boundaryFileName": "berlin-district-boundaries-canvas.json"
     }
   ]
 }

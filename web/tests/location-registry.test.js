@@ -3,61 +3,119 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
+  buildLocationAssetUrls,
   createDefaultLocationRegistry,
-  findLocationByFileName,
+  findLocationById,
   loadLocationRegistry,
   parseLocationRegistry,
-  resolveLocationName,
+  resolveLocationEntry,
 } from '../src/core/location-registry.js';
 
 test('parseLocationRegistry accepts valid location registry payloads', () => {
   const registry = parseLocationRegistry({
     locations: [
-      { name: 'Berlin', fileName: 'berlin' },
-      { name: 'Paris', fileName: 'paris' },
+      {
+        id: 'berlin',
+        name: 'Berlin',
+        graphFileName: 'berlin-routing.graph.bin.gz',
+        boundaryFileName: 'berlin-boundaries.canvas.json',
+      },
+      {
+        id: 'paris',
+        name: 'Paris',
+        graphFileName: 'paris-routing.graph.bin.gz',
+        boundaryFileName: 'paris-boundaries.canvas.json',
+      },
     ],
   });
 
   assert.deepEqual(registry, {
     locations: [
-      { name: 'Berlin', fileName: 'berlin' },
-      { name: 'Paris', fileName: 'paris' },
+      {
+        id: 'berlin',
+        name: 'Berlin',
+        graphFileName: 'berlin-routing.graph.bin.gz',
+        boundaryFileName: 'berlin-boundaries.canvas.json',
+      },
+      {
+        id: 'paris',
+        name: 'Paris',
+        graphFileName: 'paris-routing.graph.bin.gz',
+        boundaryFileName: 'paris-boundaries.canvas.json',
+      },
     ],
   });
 });
 
-test('parseLocationRegistry rejects duplicate machine-readable file names', () => {
+test('parseLocationRegistry rejects duplicate location ids', () => {
   assert.throws(
     () => parseLocationRegistry({
       locations: [
-        { name: 'Berlin', fileName: 'berlin' },
-        { name: 'Berlin Duplicate', fileName: 'berlin' },
+        {
+          id: 'berlin',
+          name: 'Berlin',
+          graphFileName: 'berlin-routing.graph.bin.gz',
+          boundaryFileName: 'berlin-boundaries.canvas.json',
+        },
+        {
+          id: 'berlin',
+          name: 'Berlin Duplicate',
+          graphFileName: 'berlin-duplicate-routing.graph.bin.gz',
+          boundaryFileName: 'berlin-duplicate-boundaries.canvas.json',
+        },
       ],
     }),
-    /duplicate location fileName/i,
+    /duplicate location id/i,
   );
 });
 
-test('resolveLocationName returns matching name and falls back when missing', () => {
+test('resolveLocationEntry returns matching location and falls back when missing', () => {
   const registry = parseLocationRegistry({
     locations: [
-      { name: 'Berlin', fileName: 'berlin' },
-      { name: 'Paris', fileName: 'paris' },
+      {
+        id: 'berlin',
+        name: 'Berlin',
+        graphFileName: 'berlin-routing.graph.bin.gz',
+        boundaryFileName: 'berlin-boundaries.canvas.json',
+      },
+      {
+        id: 'paris',
+        name: 'Paris',
+        graphFileName: 'paris-routing.graph.bin.gz',
+        boundaryFileName: 'paris-boundaries.canvas.json',
+      },
     ],
   });
 
-  assert.deepEqual(findLocationByFileName(registry, 'paris'), {
+  assert.deepEqual(findLocationById(registry, 'paris'), {
+    id: 'paris',
     name: 'Paris',
-    fileName: 'paris',
+    graphFileName: 'paris-routing.graph.bin.gz',
+    boundaryFileName: 'paris-boundaries.canvas.json',
   });
-  assert.equal(resolveLocationName(registry, 'berlin', 'Fallback'), 'Berlin');
-  assert.equal(resolveLocationName(registry, 'madrid', 'Fallback'), 'Fallback');
+  assert.deepEqual(resolveLocationEntry(registry, 'berlin'), {
+    id: 'berlin',
+    name: 'Berlin',
+    graphFileName: 'berlin-routing.graph.bin.gz',
+    boundaryFileName: 'berlin-boundaries.canvas.json',
+  });
+  assert.deepEqual(resolveLocationEntry(registry, 'madrid', 'paris'), {
+    id: 'paris',
+    name: 'Paris',
+    graphFileName: 'paris-routing.graph.bin.gz',
+    boundaryFileName: 'paris-boundaries.canvas.json',
+  });
 });
 
 test('createDefaultLocationRegistry returns Berlin default entry', () => {
   assert.deepEqual(createDefaultLocationRegistry(), {
     locations: [
-      { name: 'Berlin', fileName: 'berlin' },
+      {
+        id: 'berlin',
+        name: 'Berlin',
+        graphFileName: 'graph-walk.bin.gz',
+        boundaryFileName: 'berlin-district-boundaries-canvas.json',
+      },
     ],
   });
 });
@@ -68,9 +126,29 @@ test('committed locations.json matches the validated registry shape', async () =
 
   assert.deepEqual(parsed, {
     locations: [
-      { name: 'Berlin', fileName: 'berlin' },
+      {
+        id: 'berlin',
+        name: 'Berlin',
+        graphFileName: 'graph-walk.bin.gz',
+        boundaryFileName: 'berlin-district-boundaries-canvas.json',
+      },
     ],
   });
+});
+
+test('buildLocationAssetUrls resolves graph and boundary fetch URLs from file names', () => {
+  assert.deepEqual(
+    buildLocationAssetUrls({
+      id: 'berlin',
+      name: 'Berlin',
+      graphFileName: 'graph-walk.bin.gz',
+      boundaryFileName: 'berlin-district-boundaries-canvas.json',
+    }),
+    {
+      graphUrl: '../data_pipeline/output/graph-walk.bin.gz',
+      boundaryUrl: '../data_pipeline/output/berlin-district-boundaries-canvas.json',
+    },
+  );
 });
 
 test('loadLocationRegistry parses fetched JSON', async () => {
@@ -84,7 +162,12 @@ test('loadLocationRegistry parses fetched JSON', async () => {
         async json() {
           return {
             locations: [
-              { name: 'Berlin', fileName: 'berlin' },
+              {
+                id: 'berlin',
+                name: 'Berlin',
+                graphFileName: 'graph-walk.bin.gz',
+                boundaryFileName: 'berlin-district-boundaries-canvas.json',
+              },
             ],
           };
         },
@@ -96,7 +179,12 @@ test('loadLocationRegistry parses fetched JSON', async () => {
   assert.match(requestedUrls[0], /\/data\/locations\.json$/);
   assert.deepEqual(registry, {
     locations: [
-      { name: 'Berlin', fileName: 'berlin' },
+      {
+        id: 'berlin',
+        name: 'Berlin',
+        graphFileName: 'graph-walk.bin.gz',
+        boundaryFileName: 'berlin-district-boundaries-canvas.json',
+      },
     ],
   });
 });

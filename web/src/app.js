@@ -2,7 +2,7 @@ import {
   BYTES_PER_MEBIBYTE,
   DEFAULT_BOUNDARY_BASEMAP_URL,
   DEFAULT_GRAPH_BINARY_URL,
-  DEFAULT_LOCATION_FILE_NAME,
+  DEFAULT_LOCATION_ID,
   DEFAULT_LOCATION_NAME,
   EDGE_INTERPOLATION_SLACK_SECONDS,
   EDGE_MODE_BIKE_BIT,
@@ -34,10 +34,12 @@ import {
   resolveViewportFrame,
 } from './core/viewport.js';
 import {
+  buildLocationAssetUrls,
   loadLocationRegistry,
-  resolveLocationName,
+  resolveLocationEntry,
 } from './core/location-registry.js';
 import {
+  bindLocationSelectControl,
   bindHeaderMenuControl as bindHeaderMenuControlInternal,
   bindPointerButtonInversionControl as bindPointerButtonInversionControlInternal,
   bindThemeControl as bindThemeControlInternal,
@@ -45,7 +47,7 @@ import {
   getColourCycleMinutesFromShell,
   initializeAppShell,
   bindModeSelectControl as bindModeSelectControlInternal,
-  setLocationTitleText,
+  populateLocationSelect,
 } from './ui/orchestration.js';
 import {
   formatCommonMessage,
@@ -96,9 +98,10 @@ export {
 } from './core/coords.js';
 export {
   initializeAppShell,
+  bindLocationSelectControl,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
-  setLocationTitleText,
+  populateLocationSelect,
 } from './ui/orchestration.js';
 export {
   bindSvgExportControl,
@@ -5378,12 +5381,12 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
       loadLocationRegistry(),
     ]);
     const shell = initializeAppShell(globalThis.document, { localeBundle });
-    const locationName = resolveLocationName(
+    const initialLocation = resolveLocationEntry(
       locationRegistry,
-      DEFAULT_LOCATION_FILE_NAME,
-      DEFAULT_LOCATION_NAME,
+      DEFAULT_LOCATION_ID,
+      DEFAULT_LOCATION_ID,
     );
-    setLocationTitleText(shell, locationName);
+    populateLocationSelect(shell, locationRegistry.locations, initialLocation?.id ?? DEFAULT_LOCATION_ID);
     bindHeaderMenuControl(shell);
     bindPointerButtonInversionControl(shell);
     if (!ensureWasmSupportOrShowError(shell)) {
@@ -5391,6 +5394,109 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
     }
     let initializedMapData = null;
     let routingBinding = null;
+    let currentLocationId = null;
+    let isLocationLoading = false;
+    const redrawLoadedMap = (mapData) => {
+      if (!mapData?.graph?.header) {
+        return;
+      }
+      if (mapData.boundaryPayload) {
+        drawBoundaryBasemapAlignedToGraphGrid(
+          shell.boundaryCanvas,
+          mapData.boundaryPayload,
+          mapData.graph.header,
+          {
+            colourTheme: resolveIsochroneTheme(),
+            viewport: mapData.viewport,
+          },
+        );
+      }
+      rerenderIsochroneFromSnapshot(shell, mapData, {
+        colourTheme: resolveIsochroneTheme(),
+        colourCycleMinutes: getColourCycleMinutesFromShell(shell),
+        viewport: mapData.viewport,
+      });
+      updateDistanceScaleBar(shell, mapData.graph.header, { viewport: mapData.viewport });
+    };
+    const handleWindowResize = () => {
+      if (!initializedMapData) {
+        return;
+      }
+      redrawLoadedMap(initializedMapData);
+    };
+    window.addEventListener('resize', handleWindowResize);
+    const loadLocationById = async (requestedLocationId) => {
+      const nextLocation = resolveLocationEntry(
+        locationRegistry,
+        requestedLocationId,
+        currentLocationId ?? initialLocation?.id ?? DEFAULT_LOCATION_ID,
+      );
+      if (!nextLocation) {
+        return false;
+      }
+      if (isLocationLoading) {
+        return false;
+      }
+      if (initializedMapData && currentLocationId === nextLocation.id) {
+        shell.locationSelect.value = nextLocation.id;
+        return true;
+      }
+
+      const previousMapData = initializedMapData;
+      const previousLocationId = currentLocationId;
+      if (routingBinding?.dispose) {
+        routingBinding.dispose();
+      }
+      routingBinding = null;
+      initializedMapData = null;
+      isLocationLoading = true;
+      shell.locationSelect.disabled = true;
+      shell.isochroneCanvas.style.pointerEvents = 'none';
+      shell.isochroneCanvas.dataset.graphLoaded = 'false';
+      if (shell.exportSvgButton) {
+        shell.exportSvgButton.disabled = true;
+      }
+
+      const { boundaryUrl, graphUrl } = buildLocationAssetUrls(nextLocation);
+      try {
+        const mapData = await initializeMapData(shell, {
+          locationName: nextLocation.name,
+          boundaries: { url: boundaryUrl },
+          graph: { url: graphUrl },
+        });
+        initializedMapData = mapData;
+        currentLocationId = nextLocation.id;
+        shell.locationSelect.value = nextLocation.id;
+        routingBinding = bindCanvasClickRouting(shell, mapData);
+        return true;
+      } catch (error) {
+        initializedMapData = previousMapData;
+        currentLocationId = previousLocationId;
+        if (previousMapData) {
+          redrawLoadedMap(previousMapData);
+          routingBinding = bindCanvasClickRouting(shell, previousMapData, {
+            autoStartFromLocation: false,
+          });
+          shell.isochroneCanvas.style.pointerEvents = 'auto';
+          shell.isochroneCanvas.dataset.graphLoaded = 'true';
+          if (shell.exportSvgButton) {
+            shell.exportSvgButton.disabled = false;
+          }
+        }
+        shell.locationSelect.value =
+          previousLocationId ?? nextLocation.id;
+        console.error(error);
+        return false;
+      } finally {
+        isLocationLoading = false;
+        shell.locationSelect.disabled = false;
+      }
+    };
+    bindLocationSelectControl(shell, {
+      onLocationChange(locationId) {
+        void loadLocationById(locationId);
+      },
+    });
     const themeBinding = bindThemeControl(shell, {
       onThemeChange(themeValue) {
         if (initializedMapData?.boundaryPayload && initializedMapData?.graph?.header) {
@@ -5528,33 +5634,6 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         return routingBinding?.requestIsochroneRedraw() ?? false;
       },
     });
-    void initializeMapData(shell, { locationName })
-      .then((mapData) => {
-        initializedMapData = mapData;
-        window.addEventListener('resize', () => {
-          if (mapData.boundaryPayload) {
-            drawBoundaryBasemapAlignedToGraphGrid(
-              shell.boundaryCanvas,
-              mapData.boundaryPayload,
-              mapData.graph.header,
-              {
-                colourTheme: resolveIsochroneTheme(),
-                viewport: mapData.viewport,
-              },
-            );
-          }
-          rerenderIsochroneFromSnapshot(shell, mapData, {
-            colourTheme: resolveIsochroneTheme(),
-            colourCycleMinutes: getColourCycleMinutesFromShell(shell),
-            viewport: mapData.viewport,
-          });
-          updateDistanceScaleBar(shell, mapData.graph.header, { viewport: mapData.viewport });
-        });
-        routingBinding = bindCanvasClickRouting(shell, mapData);
-      })
-      .catch((error) => {
-        initializedMapData = null;
-        console.error(error);
-      });
+    void loadLocationById(initialLocation?.id ?? DEFAULT_LOCATION_ID);
   });
 }

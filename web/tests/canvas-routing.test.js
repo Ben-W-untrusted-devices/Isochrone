@@ -229,6 +229,46 @@ test('waitForIdle resolves after active routing run completes', async () => {
   assert.equal(idleResolved, true);
 });
 
+test('bindCanvasClickRouting can skip initial URL-driven autoroute during region restore', async () => {
+  const { shell } = createCanvasFixture();
+  const mapData = {
+    graph: {
+      header: {
+        nNodes: 16,
+      },
+    },
+  };
+
+  let runCount = 0;
+  bindCanvasClickRouting(shell, mapData, { autoStartFromLocation: false }, {
+    findNearestNodeForCanvasPixel() {
+      return { nodeIndex: 7 };
+    },
+    getAllowedModeMaskFromShell() {
+      return 4;
+    },
+    getColourCycleMinutesFromShell() {
+      return 75;
+    },
+    mapClientPointToCanvasPixel() {
+      return { xPx: 10, yPx: 12 };
+    },
+    parseNodeIndexFromLocationSearch() {
+      return 5;
+    },
+    persistNodeIndexToLocation() {},
+    renderIsochroneLegendIfNeeded() {},
+    async runWalkingIsochroneFromSourceNode() {
+      runCount += 1;
+      return { cancelled: false };
+    },
+    setRoutingStatus() {},
+  });
+
+  await flushTasks();
+  assert.equal(runCount, 0);
+});
+
 test('primary click selects origin, wheel zooms, and primary drag pans without rerouting', async () => {
   const { shell } = createCanvasFixture();
   const mapData = {

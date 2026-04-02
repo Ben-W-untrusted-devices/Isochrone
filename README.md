@@ -67,7 +67,7 @@ make wasm-build
 
 ## Runtime data
 - Web runtime loads `data_pipeline/output/graph-walk.bin.gz` by default.
-- Top-bar location text is resolved from `web/src/data/locations.json`, currently containing only `berlin -> Berlin`.
+- Top-bar location selector is populated from `web/src/data/locations.json`, where each entry defines a stable location id plus the graph and boundary asset filenames to load.
 - The graph payload is gzip-compressed and decompressed in-browser before parsing.
 - Clicking the map computes a full travel-time field across all reachable graph nodes (no walk-time cap).
 - Desktop controls:

@@ -1,6 +1,7 @@
 {
   "head.title": "Isochrone",
   "body.title": "Isochrone",
+  "body.location.aria": "Location",
   "body.options": "Options",
   "body.options.open": "Open options menu",
   "body.options.theme": "Theme",

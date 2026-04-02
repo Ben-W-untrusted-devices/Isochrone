@@ -11,7 +11,15 @@
       <header class="app-header">
         <div class="app-title-group">
           <h1 data-i18n="body.title">Isochrone</h1>
-          <span id="location-title" class="app-location-title">Berlin</span>
+          <select
+            id="location-select"
+            name="location-select"
+            class="app-location-select"
+            aria-label="Location"
+            data-i18n-attr-aria-label="body.location.aria"
+          >
+            <option value="berlin">Berlin</option>
+          </select>
         </div>
         <details id="controls-menu" class="controls-menu">
           <summary
