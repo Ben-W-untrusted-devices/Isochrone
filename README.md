@@ -19,6 +19,19 @@ make test
 make review
 ```
 
+## OSM fetch inputs
+
+```bash
+./data_pipeline/fetch-data.sh
+```
+
+- Renders the parameterized query scripts in `docs/` and downloads both routing and subdivision-boundary extracts.
+- Default place list is: Berlin, Paris, London, Rome, and Luxembourg (country).
+- Writes flat input files under `data_pipeline/input/`, for example:
+  - `berlin-routing.osm.json`
+  - `berlin-district-boundaries.osm.json`
+  - `luxembourg-country-routing.osm.json`
+
 ## Headless routing benchmark
 
 ```bash

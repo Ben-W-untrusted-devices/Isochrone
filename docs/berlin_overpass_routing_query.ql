@@ -1,5 +1,52 @@
+#!/bin/zsh
+set -euo pipefail
+
+usage() {
+  cat <<'EOF' >&2
+Usage:
+  berlin_overpass_routing_query.ql \
+    --location-label "<human readable place>" \
+    --location-relation '<Overpass relation selector>'
+
+Example:
+  berlin_overpass_routing_query.ql \
+    --location-label "Berlin" \
+    --location-relation 'rel(62422)["name"="Berlin"]["wikidata"="Q64"]'
+EOF
+  exit 1
+}
+
+location_label=""
+location_relation=""
+
+while (($# > 0)); do
+  case "$1" in
+    --location-label)
+      [[ $# -ge 2 ]] || usage
+      location_label="$2"
+      shift 2
+      ;;
+    --location-relation)
+      [[ $# -ge 2 ]] || usage
+      location_relation="$2"
+      shift 2
+      ;;
+    *)
+      usage
+      ;;
+  esac
+done
+
+[[ -n "${location_label}" ]] || usage
+[[ -n "${location_relation}" ]] || usage
+
+cat <<EOF
 /*
-Berlin routing-focused OSM extraction (no polygons)
+${location_label} routing-focused OSM extraction (no polygons)
+
+Legacy filename note:
+- this query script used to be Berlin-only
+- it is now parameterized by location relation selector
 
 Includes:
 - all highway ways (roads, footpaths, cycleways, etc.)
@@ -12,9 +59,9 @@ Output: JSON with tags + node references + referenced node coordinates (no dupli
 
 [out:json][timeout:300];
 
-/* Deterministic Berlin selector: relation 62422 (Berlin, Germany / Q64) */
-rel(62422)["name"="Berlin"]["wikidata"="Q64"]->.berlinRel;
-.berlinRel map_to_area->.searchArea;
+/* Deterministic place selector */
+${location_relation}->.placeRel;
+.placeRel map_to_area->.searchArea;
 
 (
   /* Core transport geometry */
@@ -42,3 +89,4 @@ rel(62422)["name"="Berlin"]["wikidata"="Q64"]->.berlinRel;
 out body qt;
 >;
 out skel qt;
+EOF
