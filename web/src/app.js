@@ -2,6 +2,7 @@ import {
   BYTES_PER_MEBIBYTE,
   DEFAULT_BOUNDARY_BASEMAP_URL,
   DEFAULT_GRAPH_BINARY_URL,
+  DEFAULT_LOCATION_FILE_NAME,
   DEFAULT_LOCATION_NAME,
   EDGE_INTERPOLATION_SLACK_SECONDS,
   EDGE_MODE_BIKE_BIT,
@@ -33,6 +34,10 @@ import {
   resolveViewportFrame,
 } from './core/viewport.js';
 import {
+  loadLocationRegistry,
+  resolveLocationName,
+} from './core/location-registry.js';
+import {
   bindHeaderMenuControl as bindHeaderMenuControlInternal,
   bindPointerButtonInversionControl as bindPointerButtonInversionControlInternal,
   bindThemeControl as bindThemeControlInternal,
@@ -40,6 +45,7 @@ import {
   getColourCycleMinutesFromShell,
   initializeAppShell,
   bindModeSelectControl as bindModeSelectControlInternal,
+  setLocationTitleText,
 } from './ui/orchestration.js';
 import {
   formatCommonMessage,
@@ -92,6 +98,7 @@ export {
   initializeAppShell,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
+  setLocationTitleText,
 } from './ui/orchestration.js';
 export {
   bindSvgExportControl,
@@ -5366,8 +5373,17 @@ function isClosedPath(path) {
 
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', async () => {
-    const localeBundle = await loadCommonLocaleBundle();
+    const [localeBundle, locationRegistry] = await Promise.all([
+      loadCommonLocaleBundle(),
+      loadLocationRegistry(),
+    ]);
     const shell = initializeAppShell(globalThis.document, { localeBundle });
+    const locationName = resolveLocationName(
+      locationRegistry,
+      DEFAULT_LOCATION_FILE_NAME,
+      DEFAULT_LOCATION_NAME,
+    );
+    setLocationTitleText(shell, locationName);
     bindHeaderMenuControl(shell);
     bindPointerButtonInversionControl(shell);
     if (!ensureWasmSupportOrShowError(shell)) {
@@ -5512,7 +5528,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         return routingBinding?.requestIsochroneRedraw() ?? false;
       },
     });
-    void initializeMapData(shell)
+    void initializeMapData(shell, { locationName })
       .then((mapData) => {
         initializedMapData = mapData;
         window.addEventListener('resize', () => {

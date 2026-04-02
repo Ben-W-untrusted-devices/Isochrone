@@ -6,6 +6,7 @@ import {
   bindModeSelectControl,
   bindPointerButtonInversionControl,
   bindThemeControl,
+  setLocationTitleText,
 } from '../src/ui/orchestration.js';
 
 function createEventTarget() {
@@ -181,6 +182,20 @@ test('bindModeSelectControl falls back to redraw when cycle repaint is unavailab
   assert.equal(legendRenderCount, 2);
 
   binding.dispose();
+});
+
+
+test('setLocationTitleText updates the header location label', () => {
+  const locationTitle = {
+    textContent: 'Berlin',
+  };
+  const shell = { locationTitle };
+
+  setLocationTitleText(shell, 'Paris');
+  assert.equal(locationTitle.textContent, 'Paris');
+
+  setLocationTitleText(shell, '   ');
+  assert.equal(locationTitle.textContent, '');
 });
 
 test('bindThemeControl restores persisted theme and persists changes', () => {

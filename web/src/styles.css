@@ -111,12 +111,30 @@ body {
   flex: 0 0 auto;
 }
 
+.app-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .app-header h1 {
   margin: 0;
-  margin-right: 0.5rem;
-  flex: 1 1 auto;
   font-size: 1.1rem;
   line-height: 1.2;
+  font-weight: 700;
+  color: var(--chrome-text);
+}
+
+.app-location-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1.1rem;
+  line-height: 1.2;
+  font-weight: 700;
   color: var(--chrome-text);
 }
 

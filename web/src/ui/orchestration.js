@@ -33,6 +33,7 @@ export function initializeAppShell(doc, options = {}) {
   const canvasStack = resolvedDocument.getElementById('canvas-stack');
   const controlsMenu = resolvedDocument.getElementById('controls-menu');
   const controlsMenuSummary = resolvedDocument.getElementById('controls-menu-summary');
+  const locationTitle = resolvedDocument.getElementById('location-title');
   const loadingOverlay = resolvedDocument.getElementById('loading');
   const loadingText = resolvedDocument.getElementById('loading-text');
   const loadingProgressBar = resolvedDocument.getElementById('loading-progress-bar');
@@ -66,6 +67,9 @@ export function initializeAppShell(doc, options = {}) {
   }
   if (!controlsMenuSummary || controlsMenuSummary.tagName !== 'SUMMARY') {
     throw new Error('index.html is missing <summary id="controls-menu-summary">');
+  }
+  if (!locationTitle || locationTitle.tagName !== 'SPAN') {
+    throw new Error('index.html is missing <span id="location-title">');
   }
   if (!loadingOverlay || loadingOverlay.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="loading">');
@@ -158,6 +162,7 @@ export function initializeAppShell(doc, options = {}) {
     canvasStack,
     controlsMenu,
     controlsMenuSummary,
+    locationTitle,
     loadingOverlay,
     loadingText,
     loadingProgressBar,
@@ -178,6 +183,19 @@ export function initializeAppShell(doc, options = {}) {
     loadingFadeTimeoutId: null,
     lastRenderedLegendCycleMinutes: null,
   };
+}
+
+export function setLocationTitleText(shell, locationName) {
+  if (!shell || typeof shell !== 'object' || !shell.locationTitle) {
+    throw new Error('shell.locationTitle is required');
+  }
+
+  const normalizedLocationName =
+    typeof locationName === 'string' && locationName.trim().length > 0
+      ? locationName.trim()
+      : '';
+  shell.locationTitle.textContent = normalizedLocationName;
+  return normalizedLocationName;
 }
 
 export function bindPointerButtonInversionControl(shell, options = {}) {
