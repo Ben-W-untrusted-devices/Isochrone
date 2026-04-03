@@ -19,18 +19,20 @@ make test
 make review
 ```
 
-## OSM fetch inputs
+## OSM data pipeline
 
 ```bash
 ./data_pipeline/fetch-data.sh
 ```
 
-- Renders the parameterized query scripts in `docs/` and downloads both routing and subdivision-boundary extracts.
+- Renders the parameterized query scripts in `docs/` and downloads raw Overpass JSON for both routing and subdivision-boundary extracts.
 - Default place list is: Berlin, Paris, London, Rome, and Luxembourg (country).
 - Writes flat input files under `data_pipeline/input/`, for example:
   - `berlin-routing.osm.json`
   - `berlin-district-boundaries.osm.json`
   - `luxembourg-country-routing.osm.json`
+- This fetch step does not generate canvas basemap JSON, binary routing graphs, or `.bin.gz` web artifacts.
+- Full end-to-end process for turning a fetched region into web-loadable assets is documented in `docs/region-data-pipeline.md`.
 
 ## Headless routing benchmark
 
