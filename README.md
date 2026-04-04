@@ -27,6 +27,7 @@ make review
 ./data_pipeline/region-data.py fetch
 ```
 
+- The executable script prefers the repo's `.venv/bin/python` when that virtualenv exists, so `./data_pipeline/region-data.py ...` works after `make bootstrap` even if your interactive shell is using a different Python.
 - Region configuration lives in `data_pipeline/regions.json`.
 - Default configured locations are: Berlin, Paris, London, Rome, and Luxembourg (country).
 - Fetch writes raw Overpass JSON under `data_pipeline/input/`, for example:

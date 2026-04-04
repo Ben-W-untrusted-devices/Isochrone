@@ -28,6 +28,8 @@ Run:
 ./data_pipeline/region-data.py fetch
 ```
 
+`region-data.py` prefers the repository `.venv/bin/python` when that virtualenv exists, so direct execution keeps using the project dependencies even if your shell is currently on another interpreter.
+
 The location list is loaded from `data_pipeline/regions.json`.
 
 Outputs go to `data_pipeline/input/` and are named:
