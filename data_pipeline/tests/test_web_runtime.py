@@ -192,7 +192,10 @@ def test_quality_gates_cover_python_and_js_runtime_checks() -> None:
     ci_workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
     assert package_json["scripts"]["lint:js"] == "eslint web/src web/tests"
-    assert package_json["scripts"]["test:js"] == "node --test web/tests"
+    assert (
+        package_json["scripts"]["test:js"]
+        == "node --import ./web/tests/no-network.js --test web/tests"
+    )
 
     assert "$(RUFF) check data_pipeline" in makefile
     assert "$(MYPY) data_pipeline/src" in makefile

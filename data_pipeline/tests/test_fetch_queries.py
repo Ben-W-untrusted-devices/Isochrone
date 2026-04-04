@@ -59,6 +59,28 @@ def test_routing_query_script_renders_location_selector() -> None:
     assert 'way(area.searchArea)["highway"];' in result.stdout
 
 
+def test_routing_query_script_can_scope_extract_to_bbox_tile() -> None:
+    script_path = DOCS_ROOT / "berlin_overpass_routing_query.ql"
+    result = _run_zsh_script(
+        script_path,
+        "--location-label",
+        "London",
+        "--location-relation",
+        'rel["boundary"="administrative"]["wikidata"="Q23306"]',
+        "--bbox",
+        "51.000000,-0.400000,51.200000,-0.200000",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (
+        'way(area.searchArea)(51.000000,-0.400000,51.200000,-0.200000)["highway"];' in result.stdout
+    )
+    assert (
+        'node(area.searchArea)(51.000000,-0.400000,51.200000,-0.200000)["barrier"];'
+        in result.stdout
+    )
+
+
 def test_boundary_query_script_renders_location_selector_and_admin_level() -> None:
     script_path = DOCS_ROOT / "berlin_district_boundaries_query.ql"
     result = _run_zsh_script(
@@ -143,6 +165,7 @@ def test_region_data_fetch_command_fetches_selected_locations_from_external_conf
     input_dir = tmp_path / "input"
     env = os.environ.copy()
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["ISOCHRONE_TESTS_ALLOW_SUBPROCESS_PATHS"] = str(fake_curl)
     result = _run_python_script(
         PIPELINE_ROOT / "region-data.py",
         "fetch",

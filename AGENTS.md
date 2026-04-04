@@ -29,6 +29,7 @@ This repository is configured for autonomous coding agents. Follow these rules e
 - Remove dead code and stale TODOs in touched areas.
 - Avoid broad refactors unless the task explicitly requires them.
 - Keep changes deterministic; avoid hidden side effects.
+- Automatic tests must not make network calls.
 
 ## Canonical commands
 - Bootstrap: `make bootstrap`
