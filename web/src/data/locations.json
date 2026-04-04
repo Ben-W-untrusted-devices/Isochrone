@@ -5,6 +5,12 @@
       "name": "Berlin",
       "graphFileName": "graph-walk.bin.gz",
       "boundaryFileName": "berlin-district-boundaries-canvas.json"
+    },
+    {
+      "id": "paris",
+      "name": "Paris",
+      "graphFileName": "paris-graph.bin.gz",
+      "boundaryFileName": "paris-district-boundaries-canvas.json"
     }
   ]
 }
