@@ -32,6 +32,8 @@ Run:
 
 The location list is loaded from `data_pipeline/regions.json`.
 
+For large routing extracts, a location can optionally set `routingTileSizeDegrees` in `data_pipeline/regions.json`. When present, Stage 1 first resolves the place-relation bounding box, fetches the routing extract in bbox tiles, and merges the Overpass `elements` by `(type, id)` before writing `<slug>-routing.osm.json`.
+
 Outputs go to `data_pipeline/input/` and are named:
 - `<slug>-routing.osm.json`
 - `<slug>-district-boundaries.osm.json`
