@@ -32,6 +32,16 @@ Run:
 
 The location list is loaded from `data_pipeline/regions.json`.
 
+Boundary discovery for each region is also configured there. The optional
+`subdivisionDiscoveryModes` array controls how the boundary query finds child
+administrative relations:
+
+- `"area"`: scan administrative relations inside the selected place area
+- `"subarea"`: follow explicit `subarea` membership from the selected place relation
+
+If omitted, both modes are used. Regions whose parent area scans are expensive can
+disable `"area"` and use only `"subarea"`, which is how London is configured.
+
 Outputs go to `data_pipeline/input/` and are named:
 - `<slug>-routing.osm.json`
 - `<slug>-district-boundaries.osm.json`
@@ -52,7 +62,7 @@ Boundary extracts are written in a download-friendly shape:
 - nodes with coordinates
 
 The build step reconstructs boundary polylines from those refs, so fetch does not depend on inline way geometry being present in the Overpass response.
-The boundary query discovers subdivisions using both area containment and explicit `subarea` membership so it is more robust across regions whose administrative relations are modeled differently.
+The boundary query supports both area containment and explicit `subarea` membership so it can adapt to regions whose administrative relations are modeled differently.
 
 To avoid fetching every configured region, filter by id:
 

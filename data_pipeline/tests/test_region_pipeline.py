@@ -46,6 +46,7 @@ def test_load_region_specs_reads_external_json_config(tmp_path: Path) -> None:
             boundary_file_name="paris-district-boundaries-canvas.json",
             location_relation='rel["boundary"="administrative"]["wikidata"="Q90"]',
             subdivision_admin_level="9",
+            subdivision_discovery_modes=("area", "subarea"),
             epsg=2154,
             graph_binary_file_name="paris-graph.bin",
             graph_summary_file_name="paris-graph-summary.json",
@@ -65,6 +66,7 @@ def test_build_location_manifest_strips_pipeline_only_fields() -> None:
                 boundary_file_name="paris-district-boundaries-canvas.json",
                 location_relation='rel["boundary"="administrative"]["wikidata"="Q90"]',
                 subdivision_admin_level="9",
+                subdivision_discovery_modes=("area", "subarea"),
                 epsg=2154,
                 graph_binary_file_name="paris-graph.bin",
                 graph_summary_file_name="paris-graph-summary.json",
@@ -145,6 +147,7 @@ def test_run_build_pipeline_writes_outputs_and_returns_manifest(
                 boundary_file_name="paris-district-boundaries-canvas.json",
                 location_relation='rel["boundary"="administrative"]["wikidata"="Q90"]',
                 subdivision_admin_level="9",
+                subdivision_discovery_modes=("area", "subarea"),
                 epsg=2154,
                 graph_binary_file_name="paris-graph.bin",
                 graph_summary_file_name="paris-graph-summary.json",
@@ -191,6 +194,7 @@ def test_build_cli_writes_ui_manifest_json_to_stdout(
                         "boundaryFileName": "paris-district-boundaries-canvas.json",
                         "locationRelation": 'rel["boundary"="administrative"]["wikidata"="Q90"]',
                         "subdivisionAdminLevel": "9",
+                        "subdivisionDiscoveryModes": ["subarea"],
                         "epsg": 2154,
                     }
                 ]
@@ -258,3 +262,4 @@ def test_default_regions_config_uses_deterministic_greater_london_relation() -> 
 
     assert london.location_relation == 'rel(175342)["name"="Greater London"]["wikidata"="Q84"]'
     assert london.subdivision_admin_level == "8"
+    assert london.subdivision_discovery_modes == ("subarea",)

@@ -26,6 +26,7 @@
       "boundaryFileName": "london-district-boundaries-canvas.json",
       "locationRelation": "rel(175342)[\"name\"=\"Greater London\"][\"wikidata\"=\"Q84\"]",
       "subdivisionAdminLevel": "8",
+      "subdivisionDiscoveryModes": ["subarea"],
       "epsg": 27700
     },
     {

@@ -122,11 +122,33 @@ def test_boundary_query_script_renders_location_selector_and_admin_level() -> No
     assert result.returncode == 0, result.stderr
     assert "Luxembourg (country) subdivision boundaries" in result.stdout
     assert 'rel["boundary"="administrative"]["wikidata"="Q32"]->.placeRel;' in result.stdout
+    assert ".placeRel map_to_area->.placeArea;" in result.stdout
     assert 'rel(r.placeRel:"subarea")' in result.stdout
     assert '["admin_level"="8"];' in result.stdout
     assert ")->.subdivisions;" in result.stdout
     assert "out body qt;" in result.stdout
     assert "out skel qt;" in result.stdout
+    assert '["type"="boundary"]' not in result.stdout
+
+
+def test_boundary_query_script_can_use_subarea_only_discovery_mode() -> None:
+    script_path = DOCS_ROOT / "overpass_boundary_query.sh"
+    result = _run_shell_script(
+        script_path,
+        "--location-label",
+        "London",
+        "--location-relation",
+        'rel(175342)["name"="Greater London"]["wikidata"="Q84"]',
+        "--subdivision-admin-level",
+        "8",
+        "--subdivision-discovery-modes",
+        "subarea",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert ".placeRel map_to_area->.placeArea;" not in result.stdout
+    assert "rel(area.placeArea)" not in result.stdout
+    assert 'rel(r.placeRel:"subarea")' in result.stdout
 
 
 def test_region_data_fetch_command_fetches_selected_locations_from_external_config(

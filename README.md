@@ -30,6 +30,7 @@ make review
 - The executable script prefers the repo's `.venv/bin/python` when that virtualenv exists, so `./data_pipeline/region-data.py ...` works after `make bootstrap` even if your interactive shell is using a different Python.
 - Region configuration lives in `data_pipeline/regions.json`.
 - Default configured locations are: Berlin, Paris, London, Rome, and Luxembourg (country).
+- `subdivisionDiscoveryModes` in `data_pipeline/regions.json` controls how boundary subdivisions are discovered for each region. The default is `["area", "subarea"]`; regions such as London can use `["subarea"]` to avoid expensive area scans.
 - Fetch writes raw Overpass JSON under `data_pipeline/input/`, for example:
   - `berlin-routing.osm.json`
   - `berlin-district-boundaries.osm.json`

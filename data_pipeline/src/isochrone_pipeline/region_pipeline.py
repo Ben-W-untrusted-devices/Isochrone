@@ -38,6 +38,7 @@ class RegionSpec:
     boundary_file_name: str
     location_relation: str
     subdivision_admin_level: str
+    subdivision_discovery_modes: tuple[str, ...]
     epsg: int
     graph_binary_file_name: str
     graph_summary_file_name: str
@@ -91,6 +92,10 @@ def load_region_specs(locations_file: Path) -> tuple[RegionSpec, ...]:
             entry.get("subdivisionAdminLevel"),
             f"locations[{index}].subdivisionAdminLevel",
         )
+        subdivision_discovery_modes = _normalize_subdivision_discovery_modes(
+            entry.get("subdivisionDiscoveryModes", ["area", "subarea"]),
+            field_name=f"locations[{index}].subdivisionDiscoveryModes",
+        )
         epsg = _require_int(entry.get("epsg"), f"locations[{index}].epsg")
         graph_binary_file_name = entry.get("graphBinaryFileName")
         if graph_binary_file_name is None:
@@ -123,6 +128,7 @@ def load_region_specs(locations_file: Path) -> tuple[RegionSpec, ...]:
                 boundary_file_name=boundary_file_name,
                 location_relation=location_relation,
                 subdivision_admin_level=subdivision_admin_level,
+                subdivision_discovery_modes=subdivision_discovery_modes,
                 epsg=epsg,
                 graph_binary_file_name=graph_binary_file_name,
                 graph_summary_file_name=graph_summary_file_name,
@@ -207,6 +213,8 @@ def run_fetch_pipeline(
             spec.location_relation,
             "--subdivision-admin-level",
             spec.subdivision_admin_level,
+            "--subdivision-discovery-modes",
+            ",".join(spec.subdivision_discovery_modes),
         )
         fetch_overpass_json(
             query_text=boundary_query,
@@ -454,6 +462,28 @@ def _require_non_empty_string(value: object, field_name: str) -> str:
     if not isinstance(value, str) or value.strip() == "":
         raise ValueError(f"{field_name} must be a non-empty string")
     return value.strip()
+
+
+def _normalize_subdivision_discovery_modes(value: object, *, field_name: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{field_name} must be a non-empty array")
+
+    allowed_modes = {"area", "subarea"}
+    normalized_modes: list[str] = []
+    seen_modes: set[str] = set()
+    for index, raw_mode in enumerate(value):
+        mode = _require_non_empty_string(raw_mode, f"{field_name}[{index}]")
+        if mode not in allowed_modes:
+            allowed_list = ", ".join(sorted(allowed_modes))
+            raise ValueError(f"{field_name}[{index}] must be one of: {allowed_list}")
+        if mode in seen_modes:
+            continue
+        seen_modes.add(mode)
+        normalized_modes.append(mode)
+
+    if not normalized_modes:
+        raise ValueError(f"{field_name} must include at least one supported mode")
+    return tuple(normalized_modes)
 
 
 def _require_int(value: object, field_name: str) -> int:
