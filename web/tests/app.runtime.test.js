@@ -13,12 +13,14 @@ import {
   findNearestNodeIndexForModeFromSpatialIndex,
   mapCanvasPixelToGraphMeters,
   parseColourCycleMinutesFromLocationSearch,
+  parseLocationIdFromLocationSearch,
   parseGraphBinary,
   parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
   buildStaticEdgeVertexTemplateForMode,
   updateTravelTimesInStaticEdgeVertexTemplate,
   persistColourCycleMinutesToLocation,
+  persistLocationIdToLocation,
   persistModeValuesToLocation,
   persistNodeIndexToLocation,
   precomputeNodeModeMask,
@@ -746,6 +748,13 @@ test('parseNodeIndexFromLocationSearch validates and clamps invalid params', () 
   assert.equal(parseNodeIndexFromLocationSearch('', 100), null);
 });
 
+test('parseLocationIdFromLocationSearch returns a trimmed region id when present', () => {
+  assert.equal(parseLocationIdFromLocationSearch('?region=rome'), 'rome');
+  assert.equal(parseLocationIdFromLocationSearch('?region=%20london%20'), 'london');
+  assert.equal(parseLocationIdFromLocationSearch('?region='), null);
+  assert.equal(parseLocationIdFromLocationSearch(''), null);
+});
+
 test('persistNodeIndexToLocation rewrites URL when the node actually changes', () => {
   const locationObject = { href: 'https://example.test/map?foo=bar#viewport' };
   let replacedUrl = null;
@@ -761,6 +770,24 @@ test('persistNodeIndexToLocation rewrites URL when the node actually changes', (
 
   locationObject.href = 'https://example.test/map?foo=bar&node=9#viewport';
   const unchanged = persistNodeIndexToLocation(9, { locationObject, historyObject });
+  assert.equal(unchanged, false);
+});
+
+test('persistLocationIdToLocation writes region query value', () => {
+  const locationObject = { href: 'https://example.test/map?foo=bar#viewport' };
+  let replacedUrl = null;
+  const historyObject = {
+    replaceState(_state, _title, url) {
+      replacedUrl = url;
+    },
+  };
+
+  const changed = persistLocationIdToLocation('rome', { locationObject, historyObject });
+  assert.equal(changed, true);
+  assert.equal(replacedUrl, '/map?foo=bar&region=rome#viewport');
+
+  locationObject.href = 'https://example.test/map?foo=bar&region=rome#viewport';
+  const unchanged = persistLocationIdToLocation('rome', { locationObject, historyObject });
   assert.equal(unchanged, false);
 });
 

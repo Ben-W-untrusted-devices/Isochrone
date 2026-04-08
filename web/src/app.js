@@ -26,7 +26,9 @@ import {
 import {
   mapCanvasPixelToGraphMeters,
   mapClientPointToCanvasPixel,
+  parseLocationIdFromLocationSearch,
   parseNodeIndexFromLocationSearch,
+  persistLocationIdToLocation,
   persistNodeIndexToLocation,
 } from './core/coords.js';
 import {
@@ -90,9 +92,11 @@ export {
   mapCanvasPixelToGraphMeters,
   mapClientPointToCanvasPixel,
   parseColourCycleMinutesFromLocationSearch,
+  parseLocationIdFromLocationSearch,
   parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
   persistColourCycleMinutesToLocation,
+  persistLocationIdToLocation,
   persistModeValuesToLocation,
   persistNodeIndexToLocation,
 } from './core/coords.js';
@@ -5381,9 +5385,11 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
       loadLocationRegistry(),
     ]);
     const shell = initializeAppShell(globalThis.document, { localeBundle });
+    const requestedLocationId =
+      parseLocationIdFromLocationSearch(globalThis.location?.search ?? '') ?? DEFAULT_LOCATION_ID;
     const initialLocation = resolveLocationEntry(
       locationRegistry,
-      DEFAULT_LOCATION_ID,
+      requestedLocationId,
       DEFAULT_LOCATION_ID,
     );
     populateLocationSelect(shell, locationRegistry.locations, initialLocation?.id ?? DEFAULT_LOCATION_ID);
@@ -5467,6 +5473,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         initializedMapData = mapData;
         currentLocationId = nextLocation.id;
         shell.locationSelect.value = nextLocation.id;
+        persistLocationIdToLocation(nextLocation.id);
         routingBinding = bindCanvasClickRouting(shell, mapData);
         return true;
       } catch (error) {

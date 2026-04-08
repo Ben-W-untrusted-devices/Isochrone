@@ -116,6 +116,7 @@ make wasm-build
   - Mouse wheel zooms at the pointer.
   - Secondary drag moves the selection point.
 - Zoom/pan redraw the current routing snapshot; camera movement does not start a new route solve.
+- Selected region is persisted in URL query params as `region=<locationId>`.
 - Last selected start node is persisted in URL query params as `node=<graphNodeId>` and restored on reload.
 - Selected transport modes and colour-cycle duration are also persisted in the URL as `modes=` and `cycle=`.
 - Theme, pointer-button inversion, transport modes, and colour cycle controls are in the header **Options** menu.

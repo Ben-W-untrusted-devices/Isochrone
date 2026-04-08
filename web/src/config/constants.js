@@ -23,6 +23,7 @@ export const ROAD_CLASS_MOTORWAY = 15;
 export const DEFAULT_COLOUR_CYCLE_MINUTES = 75;
 export const LOADING_FADE_MS = 180;
 export const LAST_CLICKED_NODE_QUERY_PARAM = 'node';
+export const SELECTED_REGION_QUERY_PARAM = 'region';
 export const MODE_SELECTION_QUERY_PARAM = 'modes';
 export const COLOUR_CYCLE_QUERY_PARAM = 'cycle';
 export const EDGE_INTERPOLATION_SLACK_SECONDS = 0.75;

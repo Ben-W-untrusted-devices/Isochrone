@@ -12,9 +12,11 @@ import {
   mapCanvasPixelToGraphMeters as appMapCanvasPixelToGraphMeters,
   mapClientPointToCanvasPixel as appMapClientPointToCanvasPixel,
   parseColourCycleMinutesFromLocationSearch as appParseColourCycleMinutesFromLocationSearch,
+  parseLocationIdFromLocationSearch as appParseLocationIdFromLocationSearch,
   parseModeValuesFromLocationSearch as appParseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch as appParseNodeIndexFromLocationSearch,
   persistColourCycleMinutesToLocation as appPersistColourCycleMinutesToLocation,
+  persistLocationIdToLocation as appPersistLocationIdToLocation,
   persistModeValuesToLocation as appPersistModeValuesToLocation,
   persistNodeIndexToLocation as appPersistNodeIndexToLocation,
   runMinHeapSelfTest as appRunMinHeapSelfTest,
@@ -29,9 +31,11 @@ import {
   mapCanvasPixelToGraphMeters,
   mapClientPointToCanvasPixel,
   parseColourCycleMinutesFromLocationSearch,
+  parseLocationIdFromLocationSearch,
   parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
   persistColourCycleMinutesToLocation,
+  persistLocationIdToLocation,
   persistModeValuesToLocation,
   persistNodeIndexToLocation,
 } from '../src/core/coords.js';
@@ -71,6 +75,8 @@ test('app re-exports coordinate module symbols', () => {
   assert.equal(appPersistModeValuesToLocation, persistModeValuesToLocation);
   assert.equal(appParseColourCycleMinutesFromLocationSearch, parseColourCycleMinutesFromLocationSearch);
   assert.equal(appPersistColourCycleMinutesToLocation, persistColourCycleMinutesToLocation);
+  assert.equal(appParseLocationIdFromLocationSearch, parseLocationIdFromLocationSearch);
+  assert.equal(appPersistLocationIdToLocation, persistLocationIdToLocation);
   assert.equal(appParseNodeIndexFromLocationSearch, parseNodeIndexFromLocationSearch);
   assert.equal(appPersistNodeIndexToLocation, persistNodeIndexToLocation);
 });
