@@ -17,6 +17,12 @@
       "name": "Rome",
       "graphFileName": "rome-graph.bin.gz",
       "boundaryFileName": "rome-district-boundaries-canvas.json"
+    },
+    {
+      "id": "luxembourg-country",
+      "name": "Luxembourg (country)",
+      "graphFileName": "luxembourg-country-graph.bin.gz",
+      "boundaryFileName": "luxembourg-country-district-boundaries-canvas.json"
     }
   ]
 }
