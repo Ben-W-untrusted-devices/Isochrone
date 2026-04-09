@@ -6,9 +6,11 @@ import subprocess
 from io import StringIO
 from pathlib import Path
 
+import pytest
 from isochrone_pipeline.region_pipeline import (
     DEFAULT_LOCATIONS_FILE,
     RegionSpec,
+    build_arg_parser,
     build_location_manifest,
     fetch_overpass_json,
     load_region_specs,
@@ -38,6 +40,59 @@ def _make_region_spec(
         boundary_resolution=25.0,
         boundary_units="meters",
     )
+
+
+def _parse_help_output(args: list[str], capsys) -> str:
+    parser = build_arg_parser()
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(args)
+    assert exc_info.value.code == 0
+    return capsys.readouterr().out
+
+
+def test_top_level_help_describes_manifest_output_and_current_examples(capsys) -> None:
+    help_text = _parse_help_output(["--help"], capsys)
+
+    assert "Fetch and build multi-region OSM-derived artifacts for the web app." in help_text
+    assert "data_pipeline/regions.json" in help_text
+    assert "build and all emit the UI locations manifest JSON to stdout." in help_text
+    assert "./data_pipeline/region-data.py fetch --only paris" in help_text
+    assert (
+        "./data_pipeline/region-data.py build --only luxembourg-country --components graph"
+        in help_text
+    )
+
+
+def test_fetch_help_documents_component_aliases_and_debug_behavior(capsys) -> None:
+    help_text = _parse_help_output(["fetch", "--help"], capsys)
+
+    assert "Download raw Overpass JSON into the input directory." in help_text
+    assert (
+        "Prints the rendered Overpass QL and request metadata to stderr before each fetch."
+        in help_text
+    )
+    assert "--components COMPONENTS" in help_text
+    assert "routing, way, ways, boundary, boundaries" in help_text
+
+
+def test_build_help_documents_stdout_manifest_and_component_aliases(capsys) -> None:
+    help_text = _parse_help_output(["build", "--help"], capsys)
+
+    assert "Build artifacts from raw inputs already present in the input directory." in help_text
+    assert "Writes the UI locations manifest JSON to stdout." in help_text
+    assert "--components COMPONENTS" in help_text
+    assert "graph, routing, way, ways, boundary, boundaries" in help_text
+
+
+def test_all_help_documents_partial_component_selection_and_stdout_manifest(capsys) -> None:
+    help_text = _parse_help_output(["all", "--help"], capsys)
+
+    assert "Fetch raw Overpass JSON, then build artifacts from the downloaded inputs." in help_text
+    assert "Writes the UI locations manifest JSON to stdout after a successful build." in help_text
+    assert "--fetch-components FETCH_COMPONENTS" in help_text
+    assert "--build-components BUILD_COMPONENTS" in help_text
+    assert "routing, way, ways, boundary, boundaries" in help_text
+    assert "graph, routing, way, ways, boundary, boundaries" in help_text
 
 
 def test_load_region_specs_reads_external_json_config(tmp_path: Path) -> None:

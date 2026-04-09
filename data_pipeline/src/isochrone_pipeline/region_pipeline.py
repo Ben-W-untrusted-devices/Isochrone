@@ -34,6 +34,13 @@ DEFAULT_FETCH_COMPONENTS: frozenset[str] = frozenset({"routing", "boundary"})
 DEFAULT_BUILD_COMPONENTS: frozenset[str] = frozenset({"graph", "boundary"})
 
 
+class RegionDataHelpFormatter(
+    argparse.ArgumentDefaultsHelpFormatter,
+    argparse.RawDescriptionHelpFormatter,
+):
+    """Formatter that preserves example blocks and includes defaults."""
+
+
 @dataclass(frozen=True)
 class RegionSpec:
     id: str
@@ -593,30 +600,52 @@ def main(
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog="region-data.py",
+        description=(
+            "Fetch and build multi-region OSM-derived artifacts for the web app.\n\n"
+            "Region configuration is loaded from data_pipeline/regions.json by default.\n"
+            "build and all emit the UI locations manifest JSON to stdout."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  ./data_pipeline/region-data.py fetch --only paris\n"
+            "  ./data_pipeline/region-data.py fetch --only luxembourg-country --components ways\n"
+            "  ./data_pipeline/region-data.py build --only luxembourg-country "
+            "--components graph > web/src/data/locations.json\n"
+            "  ./data_pipeline/region-data.py all --only paris > web/src/data/locations.json"
+        ),
+        formatter_class=RegionDataHelpFormatter,
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    common_parser = argparse.ArgumentParser(add_help=False)
+    common_parser = argparse.ArgumentParser(add_help=False, formatter_class=RegionDataHelpFormatter)
     common_parser.add_argument(
         "--locations-file",
         type=Path,
         default=DEFAULT_LOCATIONS_FILE,
-        help="Path to external region configuration JSON.",
+        help="Path to the region configuration JSON.",
     )
     common_parser.add_argument(
         "--only",
         action="append",
         default=[],
-        help="Limit processing to specific region ids (repeatable or comma-separated).",
+        help=(
+            "Limit processing to specific region ids from the locations file "
+            "(repeatable or comma-separated)."
+        ),
     )
     common_parser.add_argument(
         "--input-dir",
         type=Path,
         default=DEFAULT_INPUT_DIR,
-        help="Directory for raw Overpass JSON inputs.",
+        help="Directory containing raw Overpass JSON inputs.",
     )
 
-    fetch_common_parser = argparse.ArgumentParser(add_help=False)
+    fetch_common_parser = argparse.ArgumentParser(
+        add_help=False,
+        formatter_class=RegionDataHelpFormatter,
+    )
     fetch_common_parser.add_argument(
         "--overpass-url",
         default=DEFAULT_OVERPASS_URL,
@@ -633,17 +662,42 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "fetch",
         parents=[common_parser, fetch_common_parser],
         help="Download raw Overpass JSON only.",
+        description=(
+            "Download raw Overpass JSON into the input directory.\n"
+            "Prints the rendered Overpass QL and request metadata to stderr before each fetch."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  ./data_pipeline/region-data.py fetch --only paris\n"
+            "  ./data_pipeline/region-data.py fetch --only luxembourg-country --components ways\n"
+            "  ./data_pipeline/region-data.py fetch --only london --components boundaries"
+        ),
+        formatter_class=RegionDataHelpFormatter,
     )
     fetch_parser.add_argument(
         "--components",
         default="routing,boundary",
-        help="Comma-separated fetch components: routing, boundary.",
+        help=(
+            "Comma-separated fetch components. Supported values: "
+            "routing, way, ways, boundary, boundaries."
+        ),
     )
 
     build_parser = subparsers.add_parser(
         "build",
         parents=[common_parser],
         help="Build boundary canvas JSON, binary graphs, and gzip artifacts from raw inputs.",
+        description=(
+            "Build artifacts from raw inputs already present in the input directory.\n"
+            "Writes the UI locations manifest JSON to stdout."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  ./data_pipeline/region-data.py build > web/src/data/locations.json\n"
+            "  ./data_pipeline/region-data.py build --only luxembourg-country --components graph\n"
+            "  ./data_pipeline/region-data.py build --only rome --components boundary"
+        ),
+        formatter_class=RegionDataHelpFormatter,
     )
     build_parser.add_argument(
         "--output-dir",
@@ -654,13 +708,28 @@ def build_arg_parser() -> argparse.ArgumentParser:
     build_parser.add_argument(
         "--components",
         default="graph,boundary",
-        help="Comma-separated build components: graph, boundary.",
+        help=(
+            "Comma-separated build components. Supported values: "
+            "graph, routing, way, ways, boundary, boundaries."
+        ),
     )
 
     all_parser = subparsers.add_parser(
         "all",
         parents=[common_parser, fetch_common_parser],
         help="Run fetch plus build, then emit the UI locations manifest JSON to stdout.",
+        description=(
+            "Fetch raw Overpass JSON, then build artifacts from the downloaded inputs.\n"
+            "Writes the UI locations manifest JSON to stdout after a successful build."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  ./data_pipeline/region-data.py all > web/src/data/locations.json\n"
+            "  ./data_pipeline/region-data.py all --only paris > web/src/data/locations.json\n"
+            "  ./data_pipeline/region-data.py all --only luxembourg-country "
+            "--fetch-components ways --build-components graph"
+        ),
+        formatter_class=RegionDataHelpFormatter,
     )
     all_parser.add_argument(
         "--output-dir",
@@ -671,12 +740,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     all_parser.add_argument(
         "--fetch-components",
         default="routing,boundary",
-        help="Comma-separated fetch components: routing, boundary.",
+        help=(
+            "Comma-separated fetch components. Supported values: "
+            "routing, way, ways, boundary, boundaries."
+        ),
     )
     all_parser.add_argument(
         "--build-components",
         default="graph,boundary",
-        help="Comma-separated build components: graph, boundary.",
+        help=(
+            "Comma-separated build components. Supported values: "
+            "graph, routing, way, ways, boundary, boundaries."
+        ),
     )
 
     return parser
