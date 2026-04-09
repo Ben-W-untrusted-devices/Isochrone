@@ -2,6 +2,7 @@ import {
   BYTES_PER_MEBIBYTE,
   DEFAULT_BOUNDARY_BASEMAP_URL,
   DEFAULT_GRAPH_BINARY_URL,
+  DEFAULT_LOCATION_ID,
   DEFAULT_LOCATION_NAME,
   EDGE_INTERPOLATION_SLACK_SECONDS,
   EDGE_MODE_BIKE_BIT,
@@ -23,19 +24,44 @@ import {
   precomputeEdgeTraversalCostSecondsCache,
 } from './core/routing.js';
 import {
+  parseLanguageFromLocationSearch,
   mapCanvasPixelToGraphMeters,
   mapClientPointToCanvasPixel,
+  parseLocationIdFromLocationSearch,
   parseNodeIndexFromLocationSearch,
+  persistLocationIdToLocation,
   persistNodeIndexToLocation,
 } from './core/coords.js';
 import {
+  createDefaultMapViewport,
+  resolveViewportFrame,
+} from './core/viewport.js';
+import {
+  buildLocationAssetUrls,
+  localizeLocationRegistry,
+  loadLocationRegistry,
+  resolveLocationEntry,
+} from './core/location-registry.js';
+import {
+  bindLocationSelectControl,
   bindHeaderMenuControl as bindHeaderMenuControlInternal,
+  bindPointerButtonInversionControl as bindPointerButtonInversionControlInternal,
   bindThemeControl as bindThemeControlInternal,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
   initializeAppShell,
   bindModeSelectControl as bindModeSelectControlInternal,
+  populateLocationSelect,
 } from './ui/orchestration.js';
+import {
+  formatCommonMessage,
+  getCommonMessage,
+  loadCommonLocaleBundle,
+} from './ui/localization.js';
+import {
+  formatLegendRange,
+  formatLegendRepeatNote,
+} from './ui/legend-format.js';
 import { bindCanvasClickRouting as bindCanvasClickRoutingInternal } from './interaction/canvas-routing.js';
 import {
   bindSvgExportControl,
@@ -72,16 +98,20 @@ export {
   mapCanvasPixelToGraphMeters,
   mapClientPointToCanvasPixel,
   parseColourCycleMinutesFromLocationSearch,
+  parseLocationIdFromLocationSearch,
   parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
   persistColourCycleMinutesToLocation,
+  persistLocationIdToLocation,
   persistModeValuesToLocation,
   persistNodeIndexToLocation,
 } from './core/coords.js';
 export {
   initializeAppShell,
+  bindLocationSelectControl,
   getAllowedModeMaskFromShell,
   getColourCycleMinutesFromShell,
+  populateLocationSelect,
 } from './ui/orchestration.js';
 export {
   bindSvgExportControl,
@@ -500,12 +530,32 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     findNearestNodeForCanvasPixel,
     getAllowedModeMaskFromShell,
     getColourCycleMinutesFromShell,
+    getRoutingFailedStatusText,
     mapClientPointToCanvasPixel,
     parseNodeIndexFromLocationSearch,
     persistNodeIndexToLocation,
     renderIsochroneLegendIfNeeded,
     runWalkingIsochroneFromSourceNode,
     setRoutingStatus,
+    updateDistanceScaleBar,
+    redrawViewport(currentShell, currentMapData) {
+      if (currentMapData?.boundaryPayload && currentMapData?.graph?.header) {
+        drawBoundaryBasemapAlignedToGraphGrid(
+          currentShell.boundaryCanvas,
+          currentMapData.boundaryPayload,
+          currentMapData.graph.header,
+          {
+            colourTheme: resolveIsochroneTheme(),
+            viewport: currentMapData.viewport,
+          },
+        );
+      }
+      rerenderIsochroneFromSnapshot(currentShell, currentMapData, {
+        colourTheme: resolveIsochroneTheme(),
+        colourCycleMinutes: getColourCycleMinutesFromShell(currentShell),
+        viewport: currentMapData?.viewport,
+      });
+    },
   });
 }
 
@@ -1092,6 +1142,7 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
     'dark',
   );
   const allowedModeMask = options.allowedModeMask ?? snapshot.allowedModeMask ?? EDGE_MODE_CAR_BIT;
+  const viewport = options.viewport ?? mapData.viewport;
 
   const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
   updateRenderBackendBadge(shell, renderer);
@@ -1127,9 +1178,10 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
           colourTheme,
           append: false,
           reuseUploadedGeometry: true,
-          widthPx: mapData.graph.header.gridWidthPx,
-          heightPx: mapData.graph.header.gridHeightPx,
+          graphWidthPx: mapData.graph.header.gridWidthPx,
+          graphHeightPx: mapData.graph.header.gridHeightPx,
           edgeSlackSeconds: EDGE_INTERPOLATION_SLACK_SECONDS,
+          viewport,
         },
       );
       return true;
@@ -1143,8 +1195,9 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
       colourTheme,
       append: false,
       reuseUploadedGeometry: true,
-      widthPx: mapData.graph.header.gridWidthPx,
-      heightPx: mapData.graph.header.gridHeightPx,
+      graphWidthPx: mapData.graph.header.gridWidthPx,
+      graphHeightPx: mapData.graph.header.gridHeightPx,
+      viewport,
     });
     return true;
   }
@@ -1175,6 +1228,7 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
     renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
       cycleMinutes: colourCycleMinutes,
       colourTheme,
+      viewport,
     });
     return true;
   }
@@ -1205,7 +1259,7 @@ function rerenderIsochroneFromSnapshot(shell, mapData, options = {}) {
         colourTheme,
       },
     );
-    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, { viewport });
     return true;
   }
 
@@ -1229,7 +1283,10 @@ export function rerenderIsochroneFromSnapshotWithStatus(shell, mapData, options 
   }
 
   const elapsedMs = Math.max(0, Math.round(nowImpl() - startMs));
-  setRoutingStatus(shell, formatRoutingStatusDone(elapsedMs));
+  setRoutingStatus(
+    shell,
+    formatRoutingStatusDone(elapsedMs, { messages: getShellLocaleMessages(shell) }),
+  );
   return true;
 }
 
@@ -1277,6 +1334,10 @@ export function bindHeaderMenuControl(shell, options = {}) {
 
 export function bindThemeControl(shell, options = {}) {
   return bindThemeControlInternal(shell, options);
+}
+
+export function bindPointerButtonInversionControl(shell, options = {}) {
+  return bindPointerButtonInversionControlInternal(shell, options);
 }
 
 export function getOrRotateRoutingDistScratchBuffer(mapData, nodeCount) {
@@ -1448,6 +1509,26 @@ function getBoundaryStrokeStyle(colourTheme) {
     : 'rgba(125, 175, 220, 0.55)';
 }
 
+function syncCanvasToDisplaySize(canvas) {
+  if (!canvas || typeof canvas.getBoundingClientRect !== 'function') {
+    return false;
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  if (!(rect.width > 0) || !(rect.height > 0)) {
+    return false;
+  }
+
+  const nextWidth = Math.max(1, Math.round(rect.width));
+  const nextHeight = Math.max(1, Math.round(rect.height));
+  const sizeChanged = canvas.width !== nextWidth || canvas.height !== nextHeight;
+  if (sizeChanged) {
+    canvas.width = nextWidth;
+    canvas.height = nextHeight;
+  }
+  return sizeChanged;
+}
+
 export function drawBoundaryBasemapAlignedToGraphGrid(
   boundaryCanvas,
   payload,
@@ -1465,15 +1546,27 @@ export function drawBoundaryBasemapAlignedToGraphGrid(
     throw new Error('Unable to get 2D context for boundary canvas');
   }
 
-  boundaryCanvas.width = graphHeader.gridWidthPx;
-  boundaryCanvas.height = graphHeader.gridHeightPx;
+  syncCanvasToDisplaySize(boundaryCanvas);
+  const viewportFrame = resolveViewportFrame(graphHeader, options.viewport, {
+    frameWidthPx: boundaryCanvas.width,
+    frameHeightPx: boundaryCanvas.height,
+  });
 
+  context.setTransform(1, 0, 0, 1, 0, 0);
   context.clearRect(0, 0, boundaryCanvas.width, boundaryCanvas.height);
   context.fillStyle = 'rgba(0, 0, 0, 0)';
   context.strokeStyle = getBoundaryStrokeStyle(options.colourTheme);
-  context.lineWidth = 1.2;
+  context.lineWidth = 1.2 / viewportFrame.effectiveScale;
   context.lineJoin = 'round';
   context.lineCap = 'round';
+  context.setTransform(
+    viewportFrame.effectiveScale,
+    0,
+    0,
+    viewportFrame.effectiveScale,
+    -viewportFrame.offsetXPx * viewportFrame.effectiveScale,
+    -viewportFrame.offsetYPx * viewportFrame.effectiveScale,
+  );
 
   const maxY = graphHeader.gridHeightPx - 1;
   let renderedPathCount = 0;
@@ -1509,6 +1602,8 @@ export function drawBoundaryBasemapAlignedToGraphGrid(
     }
   }
 
+  context.setTransform(1, 0, 0, 1, 0, 0);
+
   return {
     featureCount: parsedBoundary.features.length,
     pathCount: renderedPathCount,
@@ -1523,7 +1618,11 @@ export async function loadAndRenderBoundaryBasemap(shell, options = {}) {
     throw new Error('fetch is not available');
   }
 
-  showLoadingOverlay(shell, 'Loading district boundaries...', 0);
+  showLoadingOverlay(
+    shell,
+    getLocalizedShellText(shell, 'body.loading.boundaries', 'Loading district boundaries...'),
+    0,
+  );
 
   try {
     const response = await fetchImpl(url);
@@ -1538,7 +1637,7 @@ export async function loadAndRenderBoundaryBasemap(shell, options = {}) {
       pathCount += feature.paths.length;
     }
 
-    showLoadingOverlay(shell, 'Loading graph: 0.00 MB', 0);
+    showLoadingOverlay(shell, formatInitialGraphLoadingText(shell), 0);
     return {
       boundaryPayload: payload,
       boundarySummary: {
@@ -1547,7 +1646,11 @@ export async function loadAndRenderBoundaryBasemap(shell, options = {}) {
       },
     };
   } catch (error) {
-    showLoadingOverlay(shell, 'Failed to load district boundaries.', 0);
+    showLoadingOverlay(
+      shell,
+      getLocalizedShellText(shell, 'error.boundaries.load', 'Failed to load district boundaries.'),
+      0,
+    );
     throw error;
   }
 }
@@ -1737,7 +1840,7 @@ export async function loadGraphBinary(shell, options = {}) {
   const url = options.url ?? DEFAULT_GRAPH_BINARY_URL;
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
 
-  showLoadingOverlay(shell, 'Loading graph: 0.00 MB', 0);
+  showLoadingOverlay(shell, formatInitialGraphLoadingText(shell), 0);
 
   try {
     const buffer = await fetchBinaryWithProgress(url, {
@@ -1755,7 +1858,11 @@ export async function loadGraphBinary(shell, options = {}) {
   } catch (error) {
     shell.isochroneCanvas.style.pointerEvents = 'none';
     shell.isochroneCanvas.dataset.graphLoaded = 'false';
-    showLoadingOverlay(shell, 'Failed to load graph binary.', 0);
+    showLoadingOverlay(
+      shell,
+      getLocalizedShellText(shell, 'error.graph.load', 'Failed to load graph binary.'),
+      0,
+    );
     throw error;
   }
 }
@@ -1774,19 +1881,21 @@ export async function initializeMapData(shell, options = {}) {
     const boundaryLoad = await loadAndRenderBoundaryBasemap(shell, boundaryOptions);
     const graph = await loadGraphBinary(shell, graphOptions);
     const edgeCostPrecomputeKernel = await edgeCostPrecomputeKernelPromise;
-    shell.isochroneCanvas.width = graph.header.gridWidthPx;
-    shell.isochroneCanvas.height = graph.header.gridHeightPx;
     const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
     updateRenderBackendBadge(shell, renderer);
     layoutMapViewportToContainGraph(shell, graph.header);
+    syncCanvasToDisplaySize(shell.isochroneCanvas);
     const alignedBoundarySummary = drawBoundaryBasemapAlignedToGraphGrid(
       shell.boundaryCanvas,
       boundaryLoad.boundaryPayload,
       graph.header,
-      { colourTheme: resolveIsochroneTheme() },
+      {
+        colourTheme: resolveIsochroneTheme(),
+        viewport: createDefaultMapViewport(),
+      },
     );
     renderIsochroneLegendIfNeeded(shell, getColourCycleMinutesFromShell(shell));
-    updateDistanceScaleBar(shell, graph.header);
+    updateDistanceScaleBar(shell, graph.header, { viewport: createDefaultMapViewport() });
     if (shell.exportSvgButton) {
       shell.exportSvgButton.disabled = false;
     }
@@ -1810,6 +1919,7 @@ export async function initializeMapData(shell, options = {}) {
       nodeSpatialIndex,
       pixelGrid,
       travelTimeGrid,
+      viewport: createDefaultMapViewport(),
       edgeCostPrecomputeKernel,
       lastRoutingSnapshot: null,
       locationName,
@@ -1835,32 +1945,17 @@ export function layoutMapViewportToContainGraph(shell, graphHeader) {
 
   validateGraphHeaderForBoundaryAlignment(graphHeader);
   const graphAspect = graphHeader.gridWidthPx / graphHeader.gridHeightPx;
-  shell.canvasStack.style.setProperty(
-    '--map-aspect-ratio',
-    `${graphHeader.gridWidthPx} / ${graphHeader.gridHeightPx}`,
-  );
-  shell.canvasStack.style.setProperty('--map-aspect-ratio-num', String(graphAspect));
+  shell.canvasStack.style.setProperty('--map-aspect-ratio', '');
+  shell.canvasStack.style.setProperty('--map-aspect-ratio-num', '');
   shell.canvasStack.style.width = '';
   shell.canvasStack.style.height = '';
   shell.canvasStack.style.aspectRatio = '';
+  shell.canvasStack.style.transform = '';
+  shell.canvasStack.style.transformOrigin = '';
 
   return {
     aspectRatio: graphAspect,
   };
-}
-
-function formatLegendDuration(totalMinutes) {
-  const roundedMinutes = Math.max(0, Math.round(totalMinutes));
-  if (roundedMinutes < 60) {
-    return `${roundedMinutes}m`;
-  }
-
-  const hours = Math.floor(roundedMinutes / 60);
-  const minutes = roundedMinutes % 60;
-  if (minutes === 0) {
-    return `${hours}h`;
-  }
-  return `${hours}h ${minutes}m`;
 }
 
 function resolveIsochroneTheme(rootElement = globalThis.document?.documentElement ?? null) {
@@ -1961,6 +2056,7 @@ export function renderIsochroneLegend(shell, cycleMinutes, options = {}) {
     options.theme ?? resolveIsochroneTheme(options.rootElement),
     'dark',
   );
+  const messages = options.messages ?? getShellLocaleMessages(shell);
   const colours = getIsochronePalette(theme);
 
   const legendRows = [];
@@ -1968,7 +2064,7 @@ export function renderIsochroneLegend(shell, cycleMinutes, options = {}) {
     const colour = colours[index];
     const rangeStartMinutes = boundaries[index] * cycleMinutes;
     const rangeEndMinutes = boundaries[index + 1] * cycleMinutes;
-    const rangeLabel = `${formatLegendDuration(rangeStartMinutes)}-${formatLegendDuration(rangeEndMinutes)}`;
+    const rangeLabel = formatLegendRange(rangeStartMinutes, rangeEndMinutes, { messages });
     const colourCss = `rgb(${colour[0]}, ${colour[1]}, ${colour[2]})`;
 
     legendRows.push(
@@ -1976,7 +2072,7 @@ export function renderIsochroneLegend(shell, cycleMinutes, options = {}) {
     );
   }
   legendRows.push(
-    `<div class="legend-note">Colours repeat every ${formatLegendDuration(cycleMinutes)}.</div>`,
+    `<div class="legend-note">${formatLegendRepeatNote(cycleMinutes, { messages })}</div>`,
   );
 
   shell.isochroneLegend.innerHTML = legendRows.join('');
@@ -1993,21 +2089,29 @@ export function renderIsochroneLegendIfNeeded(shell, cycleMinutes, options = {})
     options.theme ?? resolveIsochroneTheme(options.rootElement),
     'dark',
   );
+  const locale = typeof options.locale === 'string' && options.locale.trim().length > 0
+    ? options.locale.trim()
+    : shell?.locale ?? 'en';
 
   if (
     shell.lastRenderedLegendCycleMinutes === cycleMinutes
     && shell.lastRenderedLegendTheme === theme
+    && shell.lastRenderedLegendLocale === locale
   ) {
     return false;
   }
 
-  renderIsochroneLegend(shell, cycleMinutes, { theme });
+  renderIsochroneLegend(shell, cycleMinutes, {
+    theme,
+    messages: options.messages ?? getShellLocaleMessages(shell),
+  });
   shell.lastRenderedLegendCycleMinutes = cycleMinutes;
   shell.lastRenderedLegendTheme = theme;
+  shell.lastRenderedLegendLocale = locale;
   return true;
 }
 
-export function updateDistanceScaleBar(shell, graphHeader) {
+export function updateDistanceScaleBar(shell, graphHeader, options = {}) {
   if (
     !shell ||
     typeof shell !== 'object' ||
@@ -2024,9 +2128,15 @@ export function updateDistanceScaleBar(shell, graphHeader) {
   if (!(canvasRect.width > 0)) {
     return;
   }
+  if (!(canvasRect.height > 0)) {
+    return;
+  }
+  const viewportFrame = resolveViewportFrame(graphHeader, options.viewport, {
+    frameWidthPx: canvasRect.width,
+    frameHeightPx: canvasRect.height,
+  });
 
-  const metresPerCssPixel =
-    (graphHeader.gridWidthPx * graphHeader.pixelSizeM) / canvasRect.width;
+  const metresPerCssPixel = graphHeader.pixelSizeM / viewportFrame.effectiveScale;
   const preferredWidthPx = 120;
   const preferredDistanceMetres = preferredWidthPx * metresPerCssPixel;
   const chosenDistanceMetres = pickScaleDistanceMetres(preferredDistanceMetres);
@@ -2360,20 +2470,80 @@ function createCanvas2dIsochroneRenderer(canvas) {
   if (!context) {
     throw new Error('Unable to get 2D context for isochrone canvas');
   }
+  const scratchCanvas =
+    globalThis.document && typeof globalThis.document.createElement === 'function'
+      ? globalThis.document.createElement('canvas')
+      : null;
+  const scratchContext = scratchCanvas?.getContext?.('2d') ?? null;
 
   return {
     mode: '2d',
-    draw(pixelGrid) {
-      if (canvas.width !== pixelGrid.widthPx) {
-        canvas.width = pixelGrid.widthPx;
+    clear(options = {}) {
+      syncCanvasToDisplaySize(canvas);
+      const targetWidthPx = options.widthPx ?? canvas.width;
+      const targetHeightPx = options.heightPx ?? canvas.height;
+      if (!Number.isFinite(targetWidthPx) || targetWidthPx <= 0) {
+        throw new Error('options.widthPx (or canvas.width) must be positive');
       }
-      if (canvas.height !== pixelGrid.heightPx) {
+      if (!Number.isFinite(targetHeightPx) || targetHeightPx <= 0) {
+        throw new Error('options.heightPx (or canvas.height) must be positive');
+      }
+
+      const widthPx = Math.floor(targetWidthPx);
+      const heightPx = Math.floor(targetHeightPx);
+      if (canvas.width !== widthPx) {
+        canvas.width = widthPx;
+      }
+      if (canvas.height !== heightPx) {
+        canvas.height = heightPx;
+      }
+      context.clearRect(0, 0, canvas.width, canvas.height);
+    },
+    draw(pixelGrid, options = {}) {
+      if (!syncCanvasToDisplaySize(canvas) && (!(canvas.width > 0) || !(canvas.height > 0))) {
+        canvas.width = pixelGrid.widthPx;
         canvas.height = pixelGrid.heightPx;
       }
 
       const imageData = new ImageData(pixelGrid.rgba, pixelGrid.widthPx, pixelGrid.heightPx);
       context.clearRect(0, 0, canvas.width, canvas.height);
-      context.putImageData(imageData, 0, 0);
+      const viewportFrame = resolveViewportFrame(
+        { gridWidthPx: pixelGrid.widthPx, gridHeightPx: pixelGrid.heightPx },
+        options.viewport,
+        {
+          frameWidthPx: canvas.width,
+          frameHeightPx: canvas.height,
+        },
+      );
+      if (
+        scratchCanvas
+        && scratchContext
+        && (
+          viewportFrame.effectiveScale !== 1
+          || viewportFrame.offsetXPx !== 0
+          || viewportFrame.offsetYPx !== 0
+          || canvas.width !== pixelGrid.widthPx
+          || canvas.height !== pixelGrid.heightPx
+        )
+      ) {
+        scratchCanvas.width = pixelGrid.widthPx;
+        scratchCanvas.height = pixelGrid.heightPx;
+        scratchContext.putImageData(imageData, 0, 0);
+        context.imageSmoothingEnabled = false;
+        context.drawImage(
+          scratchCanvas,
+          viewportFrame.offsetXPx,
+          viewportFrame.offsetYPx,
+          viewportFrame.visibleWidthPx,
+          viewportFrame.visibleHeightPx,
+          0,
+          0,
+          canvas.width,
+          canvas.height,
+        );
+      } else {
+        context.putImageData(imageData, 0, 0);
+      }
       return imageData;
     },
   };
@@ -2461,7 +2631,7 @@ export function createWebGlIsochroneRenderer(canvas, options = {}) {
 
   const contextAttributes = {
     alpha: true,
-    antialias: false,
+    antialias: true,
     depth: false,
     stencil: false,
     premultipliedAlpha: false,
@@ -2495,16 +2665,38 @@ void main(void) {
     ? `#version 300 es
 precision mediump float;
 uniform sampler2D u_texture;
+uniform vec2 u_texture_size_px;
+uniform vec2 u_viewport_px;
+uniform vec2 u_view_offset_px;
+uniform float u_view_scale;
 in vec2 v_uv;
 out vec4 outColor;
 void main(void) {
-  outColor = texture(u_texture, vec2(v_uv.x, 1.0 - v_uv.y));
+  vec2 screenPx = vec2(v_uv.x * u_viewport_px.x, (1.0 - v_uv.y) * u_viewport_px.y);
+  vec2 samplePx = u_view_offset_px + screenPx / max(u_view_scale, 1.0);
+  vec2 sampleUv = samplePx / u_texture_size_px;
+  if (sampleUv.x < 0.0 || sampleUv.y < 0.0 || sampleUv.x > 1.0 || sampleUv.y > 1.0) {
+    outColor = vec4(0.0, 0.0, 0.0, 0.0);
+    return;
+  }
+  outColor = texture(u_texture, sampleUv);
 }`
     : `precision mediump float;
 uniform sampler2D u_texture;
+uniform vec2 u_texture_size_px;
+uniform vec2 u_viewport_px;
+uniform vec2 u_view_offset_px;
+uniform float u_view_scale;
 varying vec2 v_uv;
 void main(void) {
-  gl_FragColor = texture2D(u_texture, vec2(v_uv.x, 1.0 - v_uv.y));
+  vec2 screenPx = vec2(v_uv.x * u_viewport_px.x, (1.0 - v_uv.y) * u_viewport_px.y);
+  vec2 samplePx = u_view_offset_px + screenPx / max(u_view_scale, 1.0);
+  vec2 sampleUv = samplePx / u_texture_size_px;
+  if (sampleUv.x < 0.0 || sampleUv.y < 0.0 || sampleUv.x > 1.0 || sampleUv.y > 1.0) {
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+    return;
+  }
+  gl_FragColor = texture2D(u_texture, sampleUv);
 }`;
 
   const program = createWebGlProgram(gl, vertexShaderSource, fragmentShaderSource);
@@ -2536,6 +2728,10 @@ void main(void) {
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
 
   const textureLocation = gl.getUniformLocation(program, 'u_texture');
+  const textureSizeLocation = gl.getUniformLocation(program, 'u_texture_size_px');
+  const viewportSizeLocation = gl.getUniformLocation(program, 'u_viewport_px');
+  const textureViewOffsetLocation = gl.getUniformLocation(program, 'u_view_offset_px');
+  const textureViewScaleLocation = gl.getUniformLocation(program, 'u_view_scale');
   const bindQuadToProgram = (programToBind, positionLocationToBind) => {
     gl.useProgram(programToBind);
     gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
@@ -2549,6 +2745,10 @@ void main(void) {
   let travelTimeTextureLocation = null;
   let travelTimeCycleMinutesLocation = null;
   let travelTimeThemeVariantLocation = null;
+  let travelTimeTextureSizeLocation = null;
+  let travelTimeViewportSizeLocation = null;
+  let travelTimeViewOffsetLocation = null;
+  let travelTimeViewScaleLocation = null;
 
   if (isWebGl2) {
     const travelTimeFragmentSource = `#version 300 es
@@ -2556,13 +2756,24 @@ precision highp float;
 uniform sampler2D u_time_texture;
 uniform float u_cycle_minutes;
 uniform float u_theme_variant;
+uniform vec2 u_texture_size_px;
+uniform vec2 u_viewport_px;
+uniform vec2 u_view_offset_px;
+uniform float u_view_scale;
 in vec2 v_uv;
 out vec4 outColor;
 
 ${CYCLE_COLOUR_MAP_GLSL}
 
 void main(void) {
-  float seconds = texture(u_time_texture, vec2(v_uv.x, 1.0 - v_uv.y)).r;
+  vec2 screenPx = vec2(v_uv.x * u_viewport_px.x, (1.0 - v_uv.y) * u_viewport_px.y);
+  vec2 samplePx = u_view_offset_px + screenPx / max(u_view_scale, 1.0);
+  vec2 sampleUv = samplePx / u_texture_size_px;
+  if (sampleUv.x < 0.0 || sampleUv.y < 0.0 || sampleUv.x > 1.0 || sampleUv.y > 1.0) {
+    outColor = vec4(0.0, 0.0, 0.0, 0.0);
+    return;
+  }
+  float seconds = texture(u_time_texture, sampleUv).r;
   if (seconds < 0.0) {
     outColor = vec4(0.0, 0.0, 0.0, 0.0);
     return;
@@ -2594,6 +2805,10 @@ void main(void) {
         travelTimeTextureLocation = gl.getUniformLocation(travelTimeProgram, 'u_time_texture');
         travelTimeCycleMinutesLocation = gl.getUniformLocation(travelTimeProgram, 'u_cycle_minutes');
         travelTimeThemeVariantLocation = gl.getUniformLocation(travelTimeProgram, 'u_theme_variant');
+        travelTimeTextureSizeLocation = gl.getUniformLocation(travelTimeProgram, 'u_texture_size_px');
+        travelTimeViewportSizeLocation = gl.getUniformLocation(travelTimeProgram, 'u_viewport_px');
+        travelTimeViewOffsetLocation = gl.getUniformLocation(travelTimeProgram, 'u_view_offset_px');
+        travelTimeViewScaleLocation = gl.getUniformLocation(travelTimeProgram, 'u_view_scale');
       }
     }
   }
@@ -2603,11 +2818,14 @@ void main(void) {
 in vec2 a_position_px;
 in float a_seconds;
 uniform vec2 u_viewport_px;
+uniform vec2 u_view_offset_px;
+uniform float u_view_scale;
 out float v_seconds;
 void main(void) {
+  vec2 viewPositionPx = (a_position_px - u_view_offset_px) * u_view_scale;
   vec2 clip = vec2(
-    (a_position_px.x / u_viewport_px.x) * 2.0 - 1.0,
-    1.0 - (a_position_px.y / u_viewport_px.y) * 2.0
+    (viewPositionPx.x / u_viewport_px.x) * 2.0 - 1.0,
+    1.0 - (viewPositionPx.y / u_viewport_px.y) * 2.0
   );
   v_seconds = a_seconds;
   gl_Position = vec4(clip, 0.0, 1.0);
@@ -2615,11 +2833,14 @@ void main(void) {
     : `attribute vec2 a_position_px;
 attribute float a_seconds;
 uniform vec2 u_viewport_px;
+uniform vec2 u_view_offset_px;
+uniform float u_view_scale;
 varying float v_seconds;
 void main(void) {
+  vec2 viewPositionPx = (a_position_px - u_view_offset_px) * u_view_scale;
   vec2 clip = vec2(
-    (a_position_px.x / u_viewport_px.x) * 2.0 - 1.0,
-    1.0 - (a_position_px.y / u_viewport_px.y) * 2.0
+    (viewPositionPx.x / u_viewport_px.x) * 2.0 - 1.0,
+    1.0 - (viewPositionPx.y / u_viewport_px.y) * 2.0
   );
   v_seconds = a_seconds;
   gl_Position = vec4(clip, 0.0, 1.0);
@@ -2673,6 +2894,8 @@ void main(void) {
     throw new Error('WebGL edge program is missing required attributes');
   }
   const edgeViewportLocation = gl.getUniformLocation(edgeProgram, 'u_viewport_px');
+  const edgeViewOffsetLocation = gl.getUniformLocation(edgeProgram, 'u_view_offset_px');
+  const edgeViewScaleLocation = gl.getUniformLocation(edgeProgram, 'u_view_scale');
   const edgeCycleMinutesLocation = gl.getUniformLocation(edgeProgram, 'u_cycle_minutes');
   const edgeAlphaLocation = gl.getUniformLocation(edgeProgram, 'u_alpha');
   const edgeThemeVariantLocation = gl.getUniformLocation(edgeProgram, 'u_theme_variant');
@@ -2711,6 +2934,8 @@ void main(void) {
   let indexedEdgeCostLocation = -1;
   let indexedEdgeEndpointLocation = -1;
   let indexedEdgeViewportLocation = null;
+  let indexedEdgeViewOffsetLocation = null;
+  let indexedEdgeViewScaleLocation = null;
   let indexedEdgeCycleMinutesLocation = null;
   let indexedEdgeAlphaLocation = null;
   let indexedEdgeThemeVariantLocation = null;
@@ -2735,6 +2960,8 @@ in float a_target_node_index;
 in float a_edge_cost_seconds;
 in float a_endpoint_t;
 uniform vec2 u_viewport_px;
+uniform vec2 u_view_offset_px;
+uniform float u_view_scale;
 uniform sampler2D u_node_time_texture;
 uniform ivec2 u_node_time_texture_size;
 uniform float u_edge_slack_seconds;
@@ -2754,9 +2981,10 @@ bool isFiniteSeconds(float value) {
 }
 
 void main(void) {
+  vec2 viewPositionPx = (a_position_px - u_view_offset_px) * u_view_scale;
   vec2 clip = vec2(
-    (a_position_px.x / u_viewport_px.x) * 2.0 - 1.0,
-    1.0 - (a_position_px.y / u_viewport_px.y) * 2.0
+    (viewPositionPx.x / u_viewport_px.x) * 2.0 - 1.0,
+    1.0 - (viewPositionPx.y / u_viewport_px.y) * 2.0
   );
   gl_Position = vec4(clip, 0.0, 1.0);
 
@@ -2819,6 +3047,8 @@ void main(void) {
         indexedEdgeProgram = null;
       } else {
         indexedEdgeViewportLocation = gl.getUniformLocation(indexedEdgeProgram, 'u_viewport_px');
+        indexedEdgeViewOffsetLocation = gl.getUniformLocation(indexedEdgeProgram, 'u_view_offset_px');
+        indexedEdgeViewScaleLocation = gl.getUniformLocation(indexedEdgeProgram, 'u_view_scale');
         indexedEdgeCycleMinutesLocation = gl.getUniformLocation(indexedEdgeProgram, 'u_cycle_minutes');
         indexedEdgeAlphaLocation = gl.getUniformLocation(indexedEdgeProgram, 'u_alpha');
         indexedEdgeThemeVariantLocation = gl.getUniformLocation(indexedEdgeProgram, 'u_theme_variant');
@@ -2925,9 +3155,23 @@ void main(void) {
     return { width, height };
   };
 
+  const resolveRendererViewport = (graphWidthPx, graphHeightPx, viewport) =>
+    resolveViewportFrame(
+      {
+        gridWidthPx: graphWidthPx,
+        gridHeightPx: graphHeightPx,
+      },
+      viewport,
+      {
+        frameWidthPx: canvas.width,
+        frameHeightPx: canvas.height,
+      },
+    );
+
   const renderer = {
     mode: 'webgl',
     clear(options = {}) {
+      syncCanvasToDisplaySize(canvas);
       const targetWidthPx = options.widthPx ?? canvas.width;
       const targetHeightPx = options.heightPx ?? canvas.height;
       if (!Number.isFinite(targetWidthPx) || targetWidthPx <= 0) {
@@ -2950,16 +3194,15 @@ void main(void) {
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
     },
-    draw(pixelGrid) {
+    draw(pixelGrid, options = {}) {
       validatePixelGrid(pixelGrid);
-      if (canvas.width !== pixelGrid.widthPx) {
+      if (!syncCanvasToDisplaySize(canvas) && (!(canvas.width > 0) || !(canvas.height > 0))) {
         canvas.width = pixelGrid.widthPx;
-      }
-      if (canvas.height !== pixelGrid.heightPx) {
         canvas.height = pixelGrid.heightPx;
       }
 
       gl.viewport(0, 0, canvas.width, canvas.height);
+      const viewport = resolveRendererViewport(pixelGrid.widthPx, pixelGrid.heightPx, options.viewport);
       bindQuadToProgram(program, positionLocation);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -2976,6 +3219,18 @@ void main(void) {
       );
       if (textureLocation !== null) {
         gl.uniform1i(textureLocation, 0);
+      }
+      if (textureSizeLocation !== null) {
+        gl.uniform2f(textureSizeLocation, pixelGrid.widthPx, pixelGrid.heightPx);
+      }
+      if (viewportSizeLocation !== null) {
+        gl.uniform2f(viewportSizeLocation, canvas.width, canvas.height);
+      }
+      if (textureViewOffsetLocation !== null) {
+        gl.uniform2f(textureViewOffsetLocation, viewport.offsetXPx, viewport.offsetYPx);
+      }
+      if (textureViewScaleLocation !== null) {
+        gl.uniform1f(textureViewScaleLocation, viewport.effectiveScale);
       }
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
@@ -3003,21 +3258,15 @@ void main(void) {
       const alpha = Number.isFinite(options.alpha) ? options.alpha : 1;
       const clampedAlpha = Math.max(0, Math.min(1, alpha));
       const reuseUploadedGeometry = options.reuseUploadedGeometry === true;
-      const targetWidthPx = options.widthPx ?? canvas.width;
-      const targetHeightPx = options.heightPx ?? canvas.height;
-      if (!Number.isFinite(targetWidthPx) || targetWidthPx <= 0) {
-        throw new Error('options.widthPx (or canvas.width) must be positive');
+      if (!syncCanvasToDisplaySize(canvas) && (!(canvas.width > 0) || !(canvas.height > 0))) {
+        const fallbackWidthPx = options.graphWidthPx ?? canvas.width;
+        const fallbackHeightPx = options.graphHeightPx ?? canvas.height;
+        canvas.width = Math.max(1, Math.floor(fallbackWidthPx));
+        canvas.height = Math.max(1, Math.floor(fallbackHeightPx));
       }
-      if (!Number.isFinite(targetHeightPx) || targetHeightPx <= 0) {
-        throw new Error('options.heightPx (or canvas.height) must be positive');
-      }
-
-      if (canvas.width !== targetWidthPx) {
-        canvas.width = Math.floor(targetWidthPx);
-      }
-      if (canvas.height !== targetHeightPx) {
-        canvas.height = Math.floor(targetHeightPx);
-      }
+      const graphWidthPx = options.graphWidthPx ?? canvas.width;
+      const graphHeightPx = options.graphHeightPx ?? canvas.height;
+      const viewport = resolveRendererViewport(graphWidthPx, graphHeightPx, options.viewport);
 
       gl.viewport(0, 0, canvas.width, canvas.height);
       if (!append) {
@@ -3047,6 +3296,12 @@ void main(void) {
       gl.vertexAttribPointer(edgeSecondsLocation, 1, gl.FLOAT, false, 12, 8);
       if (edgeViewportLocation !== null) {
         gl.uniform2f(edgeViewportLocation, canvas.width, canvas.height);
+      }
+      if (edgeViewOffsetLocation !== null) {
+        gl.uniform2f(edgeViewOffsetLocation, viewport.offsetXPx, viewport.offsetYPx);
+      }
+      if (edgeViewScaleLocation !== null) {
+        gl.uniform1f(edgeViewScaleLocation, viewport.effectiveScale);
       }
       if (edgeCycleMinutesLocation !== null) {
         gl.uniform1f(edgeCycleMinutesLocation, cycleMinutes);
@@ -3100,21 +3355,15 @@ void main(void) {
         throw new Error('options.edgeSlackSeconds must be a non-negative finite number');
       }
       const reuseUploadedGeometry = options.reuseUploadedGeometry === true;
-      const targetWidthPx = options.widthPx ?? canvas.width;
-      const targetHeightPx = options.heightPx ?? canvas.height;
-      if (!Number.isFinite(targetWidthPx) || targetWidthPx <= 0) {
-        throw new Error('options.widthPx (or canvas.width) must be positive');
+      if (!syncCanvasToDisplaySize(canvas) && (!(canvas.width > 0) || !(canvas.height > 0))) {
+        const fallbackWidthPx = options.graphWidthPx ?? canvas.width;
+        const fallbackHeightPx = options.graphHeightPx ?? canvas.height;
+        canvas.width = Math.max(1, Math.floor(fallbackWidthPx));
+        canvas.height = Math.max(1, Math.floor(fallbackHeightPx));
       }
-      if (!Number.isFinite(targetHeightPx) || targetHeightPx <= 0) {
-        throw new Error('options.heightPx (or canvas.height) must be positive');
-      }
-
-      if (canvas.width !== targetWidthPx) {
-        canvas.width = Math.floor(targetWidthPx);
-      }
-      if (canvas.height !== targetHeightPx) {
-        canvas.height = Math.floor(targetHeightPx);
-      }
+      const graphWidthPx = options.graphWidthPx ?? canvas.width;
+      const graphHeightPx = options.graphHeightPx ?? canvas.height;
+      const viewport = resolveRendererViewport(graphWidthPx, graphHeightPx, options.viewport);
 
       gl.viewport(0, 0, canvas.width, canvas.height);
       if (!append) {
@@ -3163,6 +3412,12 @@ void main(void) {
       gl.vertexAttribPointer(indexedEdgeEndpointLocation, 1, gl.FLOAT, false, 24, 20);
       if (indexedEdgeViewportLocation !== null) {
         gl.uniform2f(indexedEdgeViewportLocation, canvas.width, canvas.height);
+      }
+      if (indexedEdgeViewOffsetLocation !== null) {
+        gl.uniform2f(indexedEdgeViewOffsetLocation, viewport.offsetXPx, viewport.offsetYPx);
+      }
+      if (indexedEdgeViewScaleLocation !== null) {
+        gl.uniform1f(indexedEdgeViewScaleLocation, viewport.effectiveScale);
       }
       if (indexedEdgeCycleMinutesLocation !== null) {
         gl.uniform1f(indexedEdgeCycleMinutesLocation, cycleMinutes);
@@ -3220,15 +3475,18 @@ void main(void) {
     renderer.drawTravelTimeGrid = function drawTravelTimeGrid(travelTimeGrid, options = {}) {
       validateTravelTimeGrid(travelTimeGrid);
 
-      if (canvas.width !== travelTimeGrid.widthPx) {
+      if (!syncCanvasToDisplaySize(canvas) && (!(canvas.width > 0) || !(canvas.height > 0))) {
         canvas.width = travelTimeGrid.widthPx;
-      }
-      if (canvas.height !== travelTimeGrid.heightPx) {
         canvas.height = travelTimeGrid.heightPx;
       }
 
       const cycleMinutes = options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES;
       const themeVariant = getIsochroneThemeVariant(options.colourTheme ?? 'dark');
+      const viewport = resolveRendererViewport(
+        travelTimeGrid.widthPx,
+        travelTimeGrid.heightPx,
+        options.viewport,
+      );
       gl.viewport(0, 0, canvas.width, canvas.height);
       bindQuadToProgram(travelTimeProgram, travelTimePositionLocation);
       gl.activeTexture(gl.TEXTURE0);
@@ -3246,6 +3504,18 @@ void main(void) {
       );
       if (travelTimeTextureLocation !== null) {
         gl.uniform1i(travelTimeTextureLocation, 0);
+      }
+      if (travelTimeTextureSizeLocation !== null) {
+        gl.uniform2f(travelTimeTextureSizeLocation, travelTimeGrid.widthPx, travelTimeGrid.heightPx);
+      }
+      if (travelTimeViewportSizeLocation !== null) {
+        gl.uniform2f(travelTimeViewportSizeLocation, canvas.width, canvas.height);
+      }
+      if (travelTimeViewOffsetLocation !== null) {
+        gl.uniform2f(travelTimeViewOffsetLocation, viewport.offsetXPx, viewport.offsetYPx);
+      }
+      if (travelTimeViewScaleLocation !== null) {
+        gl.uniform1f(travelTimeViewScaleLocation, viewport.effectiveScale);
       }
       if (travelTimeCycleMinutesLocation !== null) {
         gl.uniform1f(travelTimeCycleMinutesLocation, cycleMinutes);
@@ -3273,11 +3543,36 @@ export function createIsochroneRenderer(canvas, options = {}) {
   }
 }
 
-export function formatRenderBackendBadgeText(rendererMode) {
+function getShellLocaleMessages(shell) {
+  return shell?.localeMessages && typeof shell.localeMessages === 'object' ? shell.localeMessages : null;
+}
+
+function getLocalizedShellText(shell, key, fallbackValue, values = {}) {
+  return formatCommonMessage(getShellLocaleMessages(shell), key, values, fallbackValue);
+}
+
+function getWasmRequiredMessage(shell) {
+  return getCommonMessage(
+    getShellLocaleMessages(shell),
+    'error.wasm.required',
+    WASM_REQUIRED_MESSAGE,
+  );
+}
+
+function formatInitialGraphLoadingText(shell) {
+  return getLocalizedShellText(shell, 'loading.graph.initial', 'Loading graph: 0.00 MB');
+}
+
+export function getRoutingFailedStatusText(shell) {
+  return getLocalizedShellText(shell, 'error.routing.failed', 'Routing failed.');
+}
+
+export function formatRenderBackendBadgeText(rendererMode, options = {}) {
+  const messages = options.messages ?? null;
   if (rendererMode === 'webgl') {
-    return 'Renderer: WebGL';
+    return formatCommonMessage(messages, 'status.renderer.webgl', {}, 'Renderer: WebGL');
   }
-  return 'Renderer: CPU';
+  return formatCommonMessage(messages, 'status.renderer.cpu', {}, 'Renderer: CPU');
 }
 
 function updateRenderBackendBadge(shell, renderer) {
@@ -3286,7 +3581,9 @@ function updateRenderBackendBadge(shell, renderer) {
   }
 
   const rendererMode = renderer?.mode === 'webgl' ? 'webgl' : 'cpu';
-  const nextText = formatRenderBackendBadgeText(rendererMode);
+  const nextText = formatRenderBackendBadgeText(rendererMode, {
+    messages: getShellLocaleMessages(shell),
+  });
   if (shell.renderBackendBadge.textContent !== nextText) {
     shell.renderBackendBadge.textContent = nextText;
   }
@@ -3304,13 +3601,34 @@ function getOrCreateIsochroneRenderer(canvas) {
   return renderer;
 }
 
-export function blitPixelGridToCanvas(canvas, pixelGrid) {
+export function blitPixelGridToCanvas(canvas, pixelGrid, options = {}) {
   if (!canvas || typeof canvas.getContext !== 'function') {
     throw new Error('canvas must provide getContext("2d")');
   }
   validatePixelGrid(pixelGrid);
   const renderer = getOrCreateIsochroneRenderer(canvas);
-  return renderer.draw(pixelGrid);
+  return renderer.draw(pixelGrid, { viewport: options.viewport });
+}
+
+export function clearRenderedIsochrone(shell, mapData = null) {
+  if (!shell || typeof shell !== 'object' || !shell.isochroneCanvas) {
+    throw new Error('shell.isochroneCanvas is required');
+  }
+
+  const renderer = getOrCreateIsochroneRenderer(shell.isochroneCanvas);
+  if (typeof renderer.clear === 'function') {
+    renderer.clear();
+  }
+
+  if (mapData && typeof mapData === 'object') {
+    if (mapData.pixelGrid) {
+      clearGrid(mapData.pixelGrid);
+    }
+    if (mapData.travelTimeGrid) {
+      clearTravelTimeGrid(mapData.travelTimeGrid);
+    }
+    mapData.lastRoutingSnapshot = null;
+  }
 }
 
 export function renderReachableNodes(shell, mapData, distSeconds, options = {}) {
@@ -3325,7 +3643,9 @@ export function renderReachableNodes(shell, mapData, distSeconds, options = {}) 
     distSeconds,
     options,
   );
-  blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+  blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, {
+    viewport: mapData.viewport,
+  });
   return paintedNodeCount;
 }
 
@@ -3983,6 +4303,9 @@ export async function runSearchTimeSliced(searchState, options = {}) {
       elapsedMs = nowImpl() - sliceStartMs;
     }
 
+    if (!cancelled && isCancelled()) {
+      cancelled = true;
+    }
     if (cancelled) {
       break;
     }
@@ -4018,26 +4341,24 @@ function renderInitialPassByBackend(renderContext) {
     renderer,
     shell,
     mapData,
-    searchState,
+    viewport,
   } = renderContext;
   if (!incrementalRender) {
     return;
   }
 
   if (supportsGpuEdgeInterpolation) {
-    renderer.clear({
-      widthPx: searchState.graph.header.gridWidthPx,
-      heightPx: searchState.graph.header.gridHeightPx,
-    });
+    renderer.clear();
   } else if (supportsGpuTravelTimeRendering) {
     clearTravelTimeGrid(mapData.travelTimeGrid);
     renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
       cycleMinutes: getColourCycleMinutesFromShell(shell),
       colourTheme: renderContext.colourTheme,
+      viewport,
     });
   } else {
     clearGrid(mapData.pixelGrid);
-    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid);
+    blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, { viewport });
   }
 }
 
@@ -4058,6 +4379,7 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
     interactiveEdgeStepStride,
     alpha,
     shell,
+    viewport,
   } = renderContext;
   let { paintedNodeCount, paintedEdgeCount } = paintCounts;
   if (!incrementalRender) {
@@ -4083,8 +4405,9 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
         cycleMinutes: colourCycleMinutes,
         colourTheme,
         append: true,
-        widthPx: searchState.graph.header.gridWidthPx,
-        heightPx: searchState.graph.header.gridHeightPx,
+        graphWidthPx: searchState.graph.header.gridWidthPx,
+        graphHeightPx: searchState.graph.header.gridHeightPx,
+        viewport,
       }),
     );
     paintedNodeCount = settledNodeCount;
@@ -4115,6 +4438,7 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
       renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
         cycleMinutes: colourCycleMinutes,
         colourTheme,
+        viewport,
       }),
     );
   } else {
@@ -4145,7 +4469,7 @@ function renderIncrementalSliceByBackend(renderContext, settledBatch, settledNod
       ),
     );
     profileMs('onSliceDrawMs', () =>
-      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid),
+      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, { viewport }),
     );
   }
 
@@ -4167,6 +4491,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
     finalEdgeStepStride,
     alpha,
     shell,
+    viewport,
   } = renderContext;
   let { paintedNodeCount, paintedEdgeCount } = paintCounts;
   let edgeVertexData = null;
@@ -4191,9 +4516,10 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
             colourTheme,
             append: false,
             reuseUploadedGeometry: true,
-            widthPx: searchState.graph.header.gridWidthPx,
-            heightPx: searchState.graph.header.gridHeightPx,
+            graphWidthPx: searchState.graph.header.gridWidthPx,
+            graphHeightPx: searchState.graph.header.gridHeightPx,
             edgeSlackSeconds: EDGE_INTERPOLATION_SLACK_SECONDS,
+            viewport,
           },
         ),
       );
@@ -4222,8 +4548,9 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
           cycleMinutes: colourCycleMinutes,
           colourTheme,
           append: false,
-          widthPx: searchState.graph.header.gridWidthPx,
-          heightPx: searchState.graph.header.gridHeightPx,
+          graphWidthPx: searchState.graph.header.gridWidthPx,
+          graphHeightPx: searchState.graph.header.gridHeightPx,
+          viewport,
         }),
       );
     }
@@ -4263,6 +4590,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
       renderer.drawTravelTimeGrid(mapData.travelTimeGrid, {
         cycleMinutes: colourCycleMinutes,
         colourTheme,
+        viewport,
       }),
     );
   } else {
@@ -4294,7 +4622,7 @@ function renderFinalPassByBackend(renderContext, paintCounts) {
       ),
     );
     profileMs('finalDrawMs', () =>
-      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid),
+      blitPixelGridToCanvas(shell.isochroneCanvas, mapData.pixelGrid, { viewport }),
     );
   }
 
@@ -4417,12 +4745,16 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
     interactiveEdgeStepStride,
     finalEdgeStepStride,
     alpha,
+    viewport: options.viewport ?? mapData.viewport,
   };
 
   profileMs('initialPassMs', () => {
     renderInitialPassByBackend(renderContext);
   });
-  setRoutingStatus(shell, formatRoutingStatusCalculating(0));
+  setRoutingStatus(
+    shell,
+    formatRoutingStatusCalculating(0, { messages: getShellLocaleMessages(shell) }),
+  );
 
   const routeStartMs = nowImpl();
   let lastStatusUpdateMs = routeStartMs;
@@ -4466,12 +4798,22 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
       paintedNodeCount = incrementalPaintCounts.paintedNodeCount;
       paintedEdgeCount = incrementalPaintCounts.paintedEdgeCount;
       if (normalizedStatusUpdateIntervalMs <= 0) {
-        setRoutingStatus(shell, formatRoutingStatusCalculating(settledNodeCount));
+        setRoutingStatus(
+          shell,
+          formatRoutingStatusCalculating(settledNodeCount, {
+            messages: getShellLocaleMessages(shell),
+          }),
+        );
         lastStatusUpdateMs = nowImpl();
       } else {
         const nowMs = nowImpl();
         if (nowMs - lastStatusUpdateMs >= statusUpdateIntervalMs) {
-          setRoutingStatus(shell, formatRoutingStatusCalculating(settledNodeCount));
+          setRoutingStatus(
+            shell,
+            formatRoutingStatusCalculating(settledNodeCount, {
+              messages: getShellLocaleMessages(shell),
+            }),
+          );
           lastStatusUpdateMs = nowMs;
         }
       }
@@ -4524,12 +4866,23 @@ export async function runSearchTimeSlicedWithRendering(shell, mapData, searchSta
 
     if (!skipFinalFullPass) {
       if (paintedNodeCount <= 1) {
-        setRoutingStatus(shell, formatRoutingStatusNoReachable(routeElapsedMs));
+        setRoutingStatus(
+          shell,
+          formatRoutingStatusNoReachable(routeElapsedMs, {
+            messages: getShellLocaleMessages(shell),
+          }),
+        );
       } else {
-        setRoutingStatus(shell, formatRoutingStatusDone(routeElapsedMs));
+        setRoutingStatus(
+          shell,
+          formatRoutingStatusDone(routeElapsedMs, { messages: getShellLocaleMessages(shell) }),
+        );
       }
     } else {
-      setRoutingStatus(shell, formatRoutingStatusPreview(routeElapsedMs));
+      setRoutingStatus(
+        shell,
+        formatRoutingStatusPreview(routeElapsedMs, { messages: getShellLocaleMessages(shell) }),
+      );
     }
   }
 
@@ -4711,29 +5064,54 @@ export function runGpuCpuParityDiagnostic(renderer, mapData, searchState, option
   };
 }
 
-export function formatRoutingStatusCalculating(settledCount) {
+export function formatRoutingStatusCalculating(settledCount, options = {}) {
   const safeCount = Math.max(0, Math.floor(settledCount));
-  return `Calculating... (${safeCount} nodes settled)`;
+  return formatCommonMessage(
+    options.messages ?? null,
+    'routing.calculating',
+    { settledCount: safeCount },
+    `Calculating... (${safeCount} nodes settled)`,
+  );
 }
 
-function formatRoutingDurationSuffix(durationMs) {
+function formatRoutingDurationSuffix(durationMs, options = {}) {
   if (!Number.isFinite(durationMs) || durationMs < 0) {
     return '';
   }
   const roundedDurationMs = Math.max(0, Math.round(durationMs));
-  return ` (${roundedDurationMs} ms)`;
+  return formatCommonMessage(
+    options.messages ?? null,
+    'routing.durationSuffix',
+    { durationMs: roundedDurationMs },
+    ` (${roundedDurationMs} ms)`,
+  );
 }
 
-export function formatRoutingStatusDone(durationMs = null) {
-  return `Done - full travel-time field ready${formatRoutingDurationSuffix(durationMs)}`;
+export function formatRoutingStatusDone(durationMs = null, options = {}) {
+  return formatCommonMessage(
+    options.messages ?? null,
+    'routing.done',
+    { durationSuffix: formatRoutingDurationSuffix(durationMs, options) },
+    `Done - full travel-time field ready${formatRoutingDurationSuffix(durationMs, options)}`,
+  );
 }
 
-export function formatRoutingStatusPreview(durationMs = null) {
-  return `Done - preview updated${formatRoutingDurationSuffix(durationMs)}`;
+export function formatRoutingStatusPreview(durationMs = null, options = {}) {
+  return formatCommonMessage(
+    options.messages ?? null,
+    'routing.preview',
+    { durationSuffix: formatRoutingDurationSuffix(durationMs, options) },
+    `Done - preview updated${formatRoutingDurationSuffix(durationMs, options)}`,
+  );
 }
 
-export function formatRoutingStatusNoReachable(durationMs = null) {
-  return `Done - no reachable network for selected mode at this start point${formatRoutingDurationSuffix(durationMs)}`;
+export function formatRoutingStatusNoReachable(durationMs = null, options = {}) {
+  return formatCommonMessage(
+    options.messages ?? null,
+    'routing.none',
+    { durationSuffix: formatRoutingDurationSuffix(durationMs, options) },
+    `Done - no reachable network for selected mode at this start point${formatRoutingDurationSuffix(durationMs, options)}`,
+  );
 }
 
 function getSelectedTransportModeLabels(shell) {
@@ -4770,21 +5148,32 @@ export function ensureWasmSupportOrShowError(shell, options = {}) {
 
   shell.isochroneCanvas.style.pointerEvents = 'none';
   shell.isochroneCanvas.dataset.graphLoaded = 'false';
-  showLoadingOverlay(shell, WASM_REQUIRED_MESSAGE, 0);
-  setRoutingStatus(shell, WASM_REQUIRED_MESSAGE);
+  const wasmRequiredMessage = getWasmRequiredMessage(shell);
+  showLoadingOverlay(shell, wasmRequiredMessage, 0);
+  setRoutingStatus(shell, wasmRequiredMessage);
   return false;
 }
 
 function updateGraphLoadingText(shell, receivedBytes, totalBytes) {
   const receivedText = formatMebibytes(receivedBytes);
   if (totalBytes === null || totalBytes <= 0) {
-    shell.loadingText.textContent = `Loading graph: ${receivedText}`;
+    shell.loadingText.textContent = getLocalizedShellText(
+      shell,
+      'loading.graph.received',
+      `Loading graph: ${receivedText}`,
+      { received: receivedText },
+    );
     return;
   }
 
   const totalText = formatMebibytes(totalBytes);
   const percent = Math.min(100, Math.round((receivedBytes / totalBytes) * 100));
-  shell.loadingText.textContent = `Loading graph: ${receivedText} / ${totalText} (${percent}%)`;
+  shell.loadingText.textContent = getLocalizedShellText(
+    shell,
+    'loading.graph.progress',
+    `Loading graph: ${receivedText} / ${totalText} (${percent}%)`,
+    { received: receivedText, total: totalText, percent },
+  );
   setLoadingProgressBar(shell.loadingProgressBar, percent);
 }
 
@@ -5036,14 +5425,146 @@ function isClosedPath(path) {
 }
 
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
-  window.addEventListener('DOMContentLoaded', () => {
-    const shell = initializeAppShell(globalThis.document);
+  window.addEventListener('DOMContentLoaded', async () => {
+    const locationSearch = globalThis.location?.search ?? '';
+    const requestedLocale = parseLanguageFromLocationSearch(locationSearch);
+    const [localeBundle, locationRegistry] = await Promise.all([
+      loadCommonLocaleBundle(
+        requestedLocale === null
+          ? undefined
+          : {
+              locale: requestedLocale,
+            },
+      ),
+      loadLocationRegistry(),
+    ]);
+    const shell = initializeAppShell(globalThis.document, { localeBundle });
+    const localizedLocationRegistry = localizeLocationRegistry(locationRegistry, localeBundle.locale);
+    const requestedLocationId = parseLocationIdFromLocationSearch(locationSearch) ?? DEFAULT_LOCATION_ID;
+    const initialLocation = resolveLocationEntry(
+      localizedLocationRegistry,
+      requestedLocationId,
+      DEFAULT_LOCATION_ID,
+    );
+    populateLocationSelect(
+      shell,
+      localizedLocationRegistry.locations,
+      initialLocation?.id ?? DEFAULT_LOCATION_ID,
+    );
     bindHeaderMenuControl(shell);
+    bindPointerButtonInversionControl(shell);
     if (!ensureWasmSupportOrShowError(shell)) {
       return;
     }
     let initializedMapData = null;
     let routingBinding = null;
+    let currentLocationId = null;
+    let isLocationLoading = false;
+    const redrawLoadedMap = (mapData) => {
+      if (!mapData?.graph?.header) {
+        return;
+      }
+      if (mapData.boundaryPayload) {
+        drawBoundaryBasemapAlignedToGraphGrid(
+          shell.boundaryCanvas,
+          mapData.boundaryPayload,
+          mapData.graph.header,
+          {
+            colourTheme: resolveIsochroneTheme(),
+            viewport: mapData.viewport,
+          },
+        );
+      }
+      rerenderIsochroneFromSnapshot(shell, mapData, {
+        colourTheme: resolveIsochroneTheme(),
+        colourCycleMinutes: getColourCycleMinutesFromShell(shell),
+        viewport: mapData.viewport,
+      });
+      updateDistanceScaleBar(shell, mapData.graph.header, { viewport: mapData.viewport });
+    };
+    const handleWindowResize = () => {
+      if (!initializedMapData) {
+        return;
+      }
+      redrawLoadedMap(initializedMapData);
+    };
+    window.addEventListener('resize', handleWindowResize);
+    const loadLocationById = async (requestedLocationId) => {
+      const nextLocation = resolveLocationEntry(
+        localizedLocationRegistry,
+        requestedLocationId,
+        currentLocationId ?? initialLocation?.id ?? DEFAULT_LOCATION_ID,
+      );
+      if (!nextLocation) {
+        return false;
+      }
+      if (isLocationLoading) {
+        return false;
+      }
+      if (initializedMapData && currentLocationId === nextLocation.id) {
+        shell.locationSelect.value = nextLocation.id;
+        return true;
+      }
+
+      const previousMapData = initializedMapData;
+      const previousLocationId = currentLocationId;
+      if (routingBinding?.dispose) {
+        routingBinding.dispose();
+      }
+      routingBinding = null;
+      if (previousMapData) {
+        clearRenderedIsochrone(shell, previousMapData);
+      }
+      initializedMapData = null;
+      isLocationLoading = true;
+      shell.locationSelect.disabled = true;
+      shell.isochroneCanvas.style.pointerEvents = 'none';
+      shell.isochroneCanvas.dataset.graphLoaded = 'false';
+      if (shell.exportSvgButton) {
+        shell.exportSvgButton.disabled = true;
+      }
+
+      const { boundaryUrl, graphUrl } = buildLocationAssetUrls(nextLocation);
+      try {
+        const mapData = await initializeMapData(shell, {
+          locationName: nextLocation.name,
+          boundaries: { url: boundaryUrl },
+          graph: { url: graphUrl },
+        });
+        initializedMapData = mapData;
+        currentLocationId = nextLocation.id;
+        shell.locationSelect.value = nextLocation.id;
+        persistLocationIdToLocation(nextLocation.id);
+        routingBinding = bindCanvasClickRouting(shell, mapData);
+        return true;
+      } catch (error) {
+        initializedMapData = previousMapData;
+        currentLocationId = previousLocationId;
+        if (previousMapData) {
+          redrawLoadedMap(previousMapData);
+          routingBinding = bindCanvasClickRouting(shell, previousMapData, {
+            autoStartFromLocation: false,
+          });
+          shell.isochroneCanvas.style.pointerEvents = 'auto';
+          shell.isochroneCanvas.dataset.graphLoaded = 'true';
+          if (shell.exportSvgButton) {
+            shell.exportSvgButton.disabled = false;
+          }
+        }
+        shell.locationSelect.value =
+          previousLocationId ?? nextLocation.id;
+        console.error(error);
+        return false;
+      } finally {
+        isLocationLoading = false;
+        shell.locationSelect.disabled = false;
+      }
+    };
+    bindLocationSelectControl(shell, {
+      onLocationChange(locationId) {
+        void loadLocationById(locationId);
+      },
+    });
     const themeBinding = bindThemeControl(shell, {
       onThemeChange(themeValue) {
         if (initializedMapData?.boundaryPayload && initializedMapData?.graph?.header) {
@@ -5051,7 +5572,10 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
             shell.boundaryCanvas,
             initializedMapData.boundaryPayload,
             initializedMapData.graph.header,
-            { colourTheme: themeValue },
+            {
+              colourTheme: themeValue,
+              viewport: initializedMapData.viewport,
+            },
           );
         }
         const cycleMinutes = getColourCycleMinutesFromShell(shell);
@@ -5059,6 +5583,7 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         const rerendered = rerenderIsochroneFromSnapshotWithStatus(shell, initializedMapData, {
           colourTheme: themeValue,
           colourCycleMinutes: cycleMinutes,
+          viewport: initializedMapData?.viewport,
         });
         if (!rerendered) {
           routingBinding?.requestIsochroneRedraw();
@@ -5141,16 +5666,25 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           edgeVertexData,
           cycleMinutes,
           title,
+          messages: getShellLocaleMessages(shell),
           scaleBarLabel,
           scaleBarWidthPx,
           copyrightNotice,
         });
       },
       onExportSuccess(result) {
-        setRoutingStatus(shell, `Exported SVG: ${result.filename}`);
+        setRoutingStatus(
+          shell,
+          getLocalizedShellText(shell, 'routing.exportedSvg', `Exported SVG: ${result.filename}`, {
+            filename: result.filename,
+          }),
+        );
       },
       onExportError() {
-        setRoutingStatus(shell, 'SVG export failed.');
+        setRoutingStatus(
+          shell,
+          getLocalizedShellText(shell, 'routing.exportFailed', 'SVG export failed.'),
+        );
       },
     });
     bindModeSelectControl(shell, {
@@ -5169,17 +5703,6 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
         return routingBinding?.requestIsochroneRedraw() ?? false;
       },
     });
-    void initializeMapData(shell)
-      .then((mapData) => {
-        initializedMapData = mapData;
-        window.addEventListener('resize', () => {
-          updateDistanceScaleBar(shell, mapData.graph.header);
-        });
-        routingBinding = bindCanvasClickRouting(shell, mapData);
-      })
-      .catch((error) => {
-        initializedMapData = null;
-        console.error(error);
-      });
+    void loadLocationById(initialLocation?.id ?? DEFAULT_LOCATION_ID);
   });
 }

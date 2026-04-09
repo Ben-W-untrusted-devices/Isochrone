@@ -111,13 +111,39 @@ body {
   flex: 0 0 auto;
 }
 
+.app-title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .app-header h1 {
   margin: 0;
-  margin-right: 0.5rem;
-  flex: 1 1 auto;
   font-size: 1.1rem;
   line-height: 1.2;
+  font-weight: 700;
   color: var(--chrome-text);
+}
+
+.app-location-select {
+  min-width: 0;
+  max-width: min(18rem, 40vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1.1rem;
+  line-height: 1.2;
+  font-weight: 700;
+  font-family: inherit;
+  color: var(--chrome-text);
+  background: transparent;
+  border: 1px solid var(--control-border);
+  border-radius: 0.35rem;
+  padding: 0.18rem 1.9rem 0.18rem 0.45rem;
+  appearance: auto;
+  cursor: pointer;
 }
 
 .controls-menu {
@@ -168,6 +194,15 @@ body {
 .control-row {
   display: grid;
   gap: 0.32rem;
+}
+
+.control-row-checkbox {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.control-row-checkbox label {
+  margin-right: 0.5rem;
 }
 
 .control-row label {
@@ -234,26 +269,14 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   background: var(--map-bg);
-  display: grid;
-  place-items: center;
   overflow: hidden;
-  container-type: size;
 }
 
 .canvas-stack {
-  position: relative;
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: auto;
-  max-width: 100%;
-  max-height: 100%;
-  aspect-ratio: var(--map-aspect-ratio, 4 / 3);
-}
-
-@supports (width: 1cqw) {
-  .canvas-stack {
-    width: min(100cqw, calc(100cqh * var(--map-aspect-ratio-num, 1.333333)));
-    height: min(100cqh, calc(100cqw / var(--map-aspect-ratio-num, 1.333333)));
-  }
+  height: 100%;
 }
 
 #boundaries,

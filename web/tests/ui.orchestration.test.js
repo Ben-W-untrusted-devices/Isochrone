@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  bindLocationSelectControl,
   bindHeaderMenuControl,
   bindModeSelectControl,
+  bindPointerButtonInversionControl,
   bindThemeControl,
+  populateLocationSelect,
 } from '../src/ui/orchestration.js';
 
 function createEventTarget() {
@@ -62,6 +65,42 @@ function createThemeSelect(initialValue = 'light') {
   return {
     ...eventTarget,
     value: initialValue,
+  };
+}
+
+function createLocationSelect(initialValue = '') {
+  const eventTarget = createEventTarget();
+  const optionElements = [];
+  return {
+    ...eventTarget,
+    tagName: 'SELECT',
+    value: initialValue,
+    disabled: false,
+    ownerDocument: {
+      createElement(tagName) {
+        assert.equal(tagName, 'option');
+        return {
+          tagName: 'OPTION',
+          value: '',
+          textContent: '',
+        };
+      },
+    },
+    replaceChildren(...children) {
+      optionElements.length = 0;
+      optionElements.push(...children);
+    },
+    get options() {
+      return optionElements;
+    },
+  };
+}
+
+function createCheckbox(initialChecked = false) {
+  const eventTarget = createEventTarget();
+  return {
+    ...eventTarget,
+    checked: initialChecked,
   };
 }
 
@@ -174,6 +213,51 @@ test('bindModeSelectControl falls back to redraw when cycle repaint is unavailab
   binding.dispose();
 });
 
+
+test('populateLocationSelect replaces options and selects the requested location', () => {
+  const locationSelect = createLocationSelect();
+  const shell = { locationSelect };
+
+  const selectedLocationId = populateLocationSelect(
+    shell,
+    [
+      { id: 'berlin', name: 'Berlin' },
+      { id: 'paris', name: 'Paris' },
+    ],
+    'paris',
+  );
+
+  assert.equal(selectedLocationId, 'paris');
+  assert.equal(locationSelect.value, 'paris');
+  assert.deepEqual(
+    locationSelect.options.map((option) => ({ value: option.value, textContent: option.textContent })),
+    [
+      { value: 'berlin', textContent: 'Berlin' },
+      { value: 'paris', textContent: 'Paris' },
+    ],
+  );
+});
+
+test('bindLocationSelectControl notifies when the selected location changes', () => {
+  const locationSelect = createLocationSelect('berlin');
+  const shell = { locationSelect };
+  const changedLocationIds = [];
+  const binding = bindLocationSelectControl(shell, {
+    onLocationChange(locationId) {
+      changedLocationIds.push(locationId);
+    },
+  });
+
+  locationSelect.value = 'paris';
+  locationSelect.emit('change');
+  assert.deepEqual(changedLocationIds, ['paris']);
+
+  binding.dispose();
+  locationSelect.value = 'berlin';
+  locationSelect.emit('change');
+  assert.deepEqual(changedLocationIds, ['paris']);
+});
+
 test('bindThemeControl restores persisted theme and persists changes', () => {
   const themeSelect = createThemeSelect('light');
   const shell = { themeSelect };
@@ -244,6 +328,34 @@ test('bindThemeControl setTheme supports non-persistent temporary overrides', ()
   assert.deepEqual(persistedWrites, []);
 
   binding.dispose();
+});
+
+test('bindPointerButtonInversionControl restores persisted checkbox state and persists changes', () => {
+  const invertPointerButtonsInput = createCheckbox(false);
+  const shell = { invertPointerButtonsInput };
+  let storedValue = '1';
+  const storage = {
+    getItem(key) {
+      assert.equal(key, 'isochrone-invert-pointer-buttons');
+      return storedValue;
+    },
+    setItem(key, value) {
+      assert.equal(key, 'isochrone-invert-pointer-buttons');
+      storedValue = value;
+    },
+  };
+
+  const binding = bindPointerButtonInversionControl(shell, { storage });
+  assert.equal(invertPointerButtonsInput.checked, true);
+
+  invertPointerButtonsInput.checked = false;
+  invertPointerButtonsInput.emit('change');
+  assert.equal(storedValue, '0');
+
+  binding.dispose();
+  invertPointerButtonsInput.checked = true;
+  invertPointerButtonsInput.emit('change');
+  assert.equal(storedValue, '0');
 });
 
 test('bindHeaderMenuControl closes menu on outside pointerdown and Escape key', () => {

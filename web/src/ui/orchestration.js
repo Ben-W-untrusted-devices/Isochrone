@@ -10,12 +10,17 @@ import {
   persistColourCycleMinutesToLocation,
   persistModeValuesToLocation,
 } from '../core/coords.js';
+import {
+  applyCommonMessagesToDocument,
+  getCommonMessage,
+} from './localization.js';
 
 const CANONICAL_MODE_VALUES = ['walk', 'bike', 'car'];
 const CANONICAL_THEME_VALUES = ['light', 'dark'];
 const THEME_STORAGE_KEY = 'isochrone-theme';
+const POINTER_BUTTON_INVERSION_STORAGE_KEY = 'isochrone-invert-pointer-buttons';
 
-export function initializeAppShell(doc) {
+export function initializeAppShell(doc, options = {}) {
   const resolvedDocument = doc ?? globalThis.document;
   if (!resolvedDocument) {
     throw new Error('document is not available');
@@ -28,6 +33,7 @@ export function initializeAppShell(doc) {
   const canvasStack = resolvedDocument.getElementById('canvas-stack');
   const controlsMenu = resolvedDocument.getElementById('controls-menu');
   const controlsMenuSummary = resolvedDocument.getElementById('controls-menu-summary');
+  const locationSelect = resolvedDocument.getElementById('location-select');
   const loadingOverlay = resolvedDocument.getElementById('loading');
   const loadingText = resolvedDocument.getElementById('loading-text');
   const loadingProgressBar = resolvedDocument.getElementById('loading-progress-bar');
@@ -35,6 +41,7 @@ export function initializeAppShell(doc) {
   const renderBackendBadge = resolvedDocument.getElementById('render-backend-badge');
   const routingDisclaimer = resolvedDocument.getElementById('routing-disclaimer');
   const themeSelect = resolvedDocument.getElementById('theme-select');
+  const invertPointerButtonsInput = resolvedDocument.getElementById('invert-pointer-buttons');
   const modeSelect = resolvedDocument.getElementById('mode-select');
   const colourCycleMinutesInput = resolvedDocument.getElementById('colour-cycle-minutes');
   const exportSvgButton = resolvedDocument.getElementById('export-svg-button');
@@ -61,6 +68,9 @@ export function initializeAppShell(doc) {
   if (!controlsMenuSummary || controlsMenuSummary.tagName !== 'SUMMARY') {
     throw new Error('index.html is missing <summary id="controls-menu-summary">');
   }
+  if (!locationSelect || locationSelect.tagName !== 'SELECT') {
+    throw new Error('index.html is missing <select id="location-select">');
+  }
   if (!loadingOverlay || loadingOverlay.tagName !== 'DIV') {
     throw new Error('index.html is missing <div id="loading">');
   }
@@ -81,6 +91,9 @@ export function initializeAppShell(doc) {
   }
   if (!themeSelect || themeSelect.tagName !== 'SELECT') {
     throw new Error('index.html is missing <select id="theme-select">');
+  }
+  if (!invertPointerButtonsInput || invertPointerButtonsInput.tagName !== 'INPUT') {
+    throw new Error('index.html is missing <input id="invert-pointer-buttons">');
   }
   if (!modeSelect || modeSelect.tagName !== 'SELECT') {
     throw new Error('index.html is missing <select id="mode-select">');
@@ -104,6 +117,8 @@ export function initializeAppShell(doc) {
     throw new Error('index.html is missing <div id="isochrone-legend">');
   }
 
+  const localeBundle = applyCommonMessagesToDocument(resolvedDocument, options.localeBundle);
+
   sizeCanvasToCssPixels(isochroneCanvas);
   sizeCanvasToCssPixels(boundaryCanvas);
 
@@ -111,10 +126,18 @@ export function initializeAppShell(doc) {
   isochroneCanvas.dataset.graphLoaded = 'false';
   loadingOverlay.hidden = false;
   loadingOverlay.classList.remove('is-fading');
-  loadingText.textContent = 'Loading district boundaries...';
+  loadingText.textContent = getCommonMessage(
+    localeBundle.messages,
+    'body.loading.boundaries',
+    loadingText.textContent,
+  );
   setLoadingProgressBar(loadingProgressBar, 0);
-  routingStatus.textContent = 'Ready.';
-  renderBackendBadge.textContent = 'Renderer: Detecting...';
+  routingStatus.textContent = getCommonMessage(localeBundle.messages, 'status.ready', routingStatus.textContent);
+  renderBackendBadge.textContent = getCommonMessage(
+    localeBundle.messages,
+    'status.renderer.detecting',
+    renderBackendBadge.textContent,
+  );
   exportSvgButton.disabled = true;
   const locationSearch = globalThis.location?.search ?? '';
   const persistedModeValues = parseModeValuesFromLocationSearch(locationSearch);
@@ -139,6 +162,7 @@ export function initializeAppShell(doc) {
     canvasStack,
     controlsMenu,
     controlsMenuSummary,
+    locationSelect,
     loadingOverlay,
     loadingText,
     loadingProgressBar,
@@ -146,6 +170,7 @@ export function initializeAppShell(doc) {
     renderBackendBadge,
     routingDisclaimer,
     themeSelect,
+    invertPointerButtonsInput,
     modeSelect,
     colourCycleMinutesInput,
     exportSvgButton,
@@ -153,8 +178,100 @@ export function initializeAppShell(doc) {
     distanceScaleLine,
     distanceScaleLabel,
     isochroneLegend,
+    locale: localeBundle.locale,
+    localeMessages: localeBundle.messages,
     loadingFadeTimeoutId: null,
     lastRenderedLegendCycleMinutes: null,
+    lastRenderedLegendLocale: null,
+  };
+}
+
+export function populateLocationSelect(shell, locations, selectedLocationId = '') {
+  if (!shell || typeof shell !== 'object' || !shell.locationSelect) {
+    throw new Error('shell.locationSelect is required');
+  }
+  if (!Array.isArray(locations) || locations.length === 0) {
+    throw new Error('locations must be a non-empty array');
+  }
+  if (
+    !shell.locationSelect.ownerDocument
+    || typeof shell.locationSelect.ownerDocument.createElement !== 'function'
+    || typeof shell.locationSelect.replaceChildren !== 'function'
+  ) {
+    throw new Error('shell.locationSelect must support DOM option creation');
+  }
+
+  const optionElements = locations.map((location) => {
+    const option = shell.locationSelect.ownerDocument.createElement('option');
+    option.value = location.id;
+    option.textContent = location.name;
+    return option;
+  });
+  shell.locationSelect.replaceChildren(...optionElements);
+  const hasSelectedLocationId = locations.some((location) => location.id === selectedLocationId);
+  shell.locationSelect.value = hasSelectedLocationId ? selectedLocationId : locations[0].id;
+  return shell.locationSelect.value;
+}
+
+export function bindLocationSelectControl(shell, options = {}) {
+  if (!shell || typeof shell !== 'object' || !shell.locationSelect) {
+    throw new Error('shell.locationSelect is required');
+  }
+  const onLocationChange = options.onLocationChange ?? null;
+  if (typeof onLocationChange !== 'function') {
+    throw new Error('options.onLocationChange must be a function');
+  }
+
+  const handleChange = () => {
+    onLocationChange(shell.locationSelect.value);
+  };
+  shell.locationSelect.addEventListener('change', handleChange);
+
+  return {
+    dispose() {
+      shell.locationSelect.removeEventListener('change', handleChange);
+    },
+  };
+}
+
+export function bindPointerButtonInversionControl(shell, options = {}) {
+  if (!shell || typeof shell !== 'object' || !shell.invertPointerButtonsInput) {
+    throw new Error('shell.invertPointerButtonsInput is required');
+  }
+
+  const storage = options.storage ?? globalThis.localStorage ?? null;
+  const storageKey = options.storageKey ?? POINTER_BUTTON_INVERSION_STORAGE_KEY;
+  if (typeof storageKey !== 'string' || storageKey.length === 0) {
+    throw new Error('storageKey must be a non-empty string');
+  }
+
+  const setChecked = (checked, persist = true) => {
+    shell.invertPointerButtonsInput.checked = checked === true;
+    if (persist) {
+      safeStorageSet(storage, storageKey, checked === true ? '1' : '0');
+    }
+    return shell.invertPointerButtonsInput.checked;
+  };
+
+  const persistedValue = safeStorageGet(storage, storageKey);
+  setChecked(
+    persistedValue === '1' || persistedValue === 'true' || persistedValue === 'yes' || persistedValue === 'on',
+    false,
+  );
+
+  const handleChange = () => {
+    setChecked(shell.invertPointerButtonsInput.checked, true);
+  };
+
+  shell.invertPointerButtonsInput.addEventListener('change', handleChange);
+
+  return {
+    dispose() {
+      shell.invertPointerButtonsInput.removeEventListener('change', handleChange);
+    },
+    setChecked(checked, applyOptions = {}) {
+      return setChecked(checked, applyOptions.persist !== false);
+    },
   };
 }
 

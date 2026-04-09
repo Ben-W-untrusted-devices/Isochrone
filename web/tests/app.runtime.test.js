@@ -5,19 +5,25 @@ import {
   GRAPH_MAGIC,
   MinHeap,
   WASM_REQUIRED_MESSAGE,
+  clearRenderedIsochrone,
   computeEdgeTraversalCostSeconds,
+  createWebGlIsochroneRenderer,
   createNodeSpatialIndex,
+  createPixelGrid,
+  createTravelTimeGrid,
   createWalkingSearchState,
   ensureWasmSupportOrShowError,
   findNearestNodeIndexForModeFromSpatialIndex,
   mapCanvasPixelToGraphMeters,
   parseColourCycleMinutesFromLocationSearch,
+  parseLocationIdFromLocationSearch,
   parseGraphBinary,
   parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
   buildStaticEdgeVertexTemplateForMode,
   updateTravelTimesInStaticEdgeVertexTemplate,
   persistColourCycleMinutesToLocation,
+  persistLocationIdToLocation,
   persistModeValuesToLocation,
   persistNodeIndexToLocation,
   precomputeNodeModeMask,
@@ -26,9 +32,12 @@ import {
   getOrBuildEdgeTraversalCostTicksForMode,
   getOrRotateRoutingDistScratchBuffer,
   buildModeSpecificKernelGraphViews,
+  drawBoundaryBasemapAlignedToGraphGrid,
   buildStaticEdgeNodeIndexedVertexData,
+  layoutMapViewportToContainGraph,
   rerenderIsochroneFromSnapshotWithStatus,
   renderIsochroneLegendIfNeeded,
+  runSearchTimeSliced,
   shouldUploadEdgeGeometry,
   updateDistanceScaleBar,
   timeToColour,
@@ -495,6 +504,71 @@ test('ensureWasmSupportOrShowError renders required message when WASM is unavail
   assert.equal(shell.routingStatus.textContent, WASM_REQUIRED_MESSAGE);
 });
 
+test('runSearchTimeSliced treats cancellation raised during expandOne as cancelled before onSlice runs', async () => {
+  let cancelled = false;
+  let done = false;
+  let onSliceCallCount = 0;
+  const searchState = {
+    isDone() {
+      return done;
+    },
+    expandOne() {
+      cancelled = true;
+      done = true;
+      return 7;
+    },
+  };
+
+  const summary = await runSearchTimeSliced(searchState, {
+    isCancelled() {
+      return cancelled;
+    },
+    onSlice() {
+      onSliceCallCount += 1;
+    },
+    nowImpl() {
+      return 0;
+    },
+  });
+
+  assert.equal(summary.cancelled, true);
+  assert.equal(summary.totalSettledCount, 1);
+  assert.equal(summary.sliceCount, 0);
+  assert.equal(onSliceCallCount, 0);
+});
+
+test('clearRenderedIsochrone clears stale routing snapshot and renderer state before a new map loads', () => {
+  let clearCallCount = 0;
+  const shell = {
+    isochroneCanvas: {
+      __isochroneRenderer: {
+        draw() {},
+        clear() {
+          clearCallCount += 1;
+        },
+      },
+    },
+  };
+  const pixelGrid = createPixelGrid(2, 2);
+  pixelGrid.rgba.fill(255);
+  const travelTimeGrid = createTravelTimeGrid(2, 2);
+  travelTimeGrid.seconds.fill(12);
+  const mapData = {
+    pixelGrid,
+    travelTimeGrid,
+    lastRoutingSnapshot: { sourceNodeIndex: 42 },
+  };
+
+  clearRenderedIsochrone(shell, mapData);
+
+  assert.equal(clearCallCount, 1);
+  assert.equal(mapData.lastRoutingSnapshot, null);
+  for (let i = 3; i < pixelGrid.rgba.length; i += 4) {
+    assert.equal(pixelGrid.rgba[i], 0);
+  }
+  assert.ok(Array.from(travelTimeGrid.seconds).every((value) => value === -1));
+});
+
 test('timeToColour wraps to the beginning after each configured cycle', () => {
   const start = timeToColour(0, { cycleMinutes: 60 });
   const afterCycle = timeToColour(3600, { cycleMinutes: 60 });
@@ -527,6 +601,48 @@ test('renderIsochroneLegendIfNeeded renders print-safe swatches and caches by th
   assert.equal(themeChangeRender, true);
 });
 
+test('renderIsochroneLegendIfNeeded localizes time ranges and rerenders when locale changes', () => {
+  const shell = {
+    isochroneLegend: { innerHTML: '' },
+    lastRenderedLegendCycleMinutes: null,
+    lastRenderedLegendTheme: null,
+    lastRenderedLegendLocale: null,
+    locale: 'en',
+  };
+  const englishMessages = {
+    'legend.duration.minuteOnly': '{minutes} min',
+    'legend.duration.hourOnly': '{hours} h',
+    'legend.duration.hourMinute': '{hours} h {minutes} min',
+    'legend.range': '{start}–{end}',
+    'legend.repeat': 'Colours repeat every {duration}.',
+  };
+  const frenchMessages = {
+    'legend.duration.minuteOnly': '{minutes} min',
+    'legend.duration.hourOnly': '{hours} h',
+    'legend.duration.hourMinute': '{hours} h {minutes} min',
+    'legend.range': '{start}–{end}',
+    'legend.repeat': 'Les couleurs se répètent toutes les {duration}.',
+  };
+
+  const firstRender = renderIsochroneLegendIfNeeded(shell, 120, {
+    theme: 'dark',
+    locale: 'en',
+    messages: englishMessages,
+  });
+  assert.equal(firstRender, true);
+  assert.ok(shell.isochroneLegend.innerHTML.includes('48 min–1 h 12 min'));
+  assert.ok(shell.isochroneLegend.innerHTML.includes('Colours repeat every 2 h.'));
+
+  const localeChangeRender = renderIsochroneLegendIfNeeded(shell, 120, {
+    theme: 'dark',
+    locale: 'fr',
+    messages: frenchMessages,
+  });
+  assert.equal(localeChangeRender, true);
+  assert.ok(shell.isochroneLegend.innerHTML.includes('48 min–1 h 12 min'));
+  assert.ok(shell.isochroneLegend.innerHTML.includes('Les couleurs se répètent toutes les 2 h.'));
+});
+
 test('updateDistanceScaleBar sets distance-aligned segment width for patterned bar', () => {
   const lineStyle = {
     width: '',
@@ -541,7 +657,7 @@ test('updateDistanceScaleBar sets distance-aligned segment width for patterned b
     distanceScaleLabel: { textContent: '' },
     isochroneCanvas: {
       getBoundingClientRect() {
-        return { width: 1000 };
+        return { width: 1000, height: 500 };
       },
     },
   };
@@ -559,12 +675,195 @@ test('updateDistanceScaleBar sets distance-aligned segment width for patterned b
   assert.equal(shell.distanceScaleLine.style.values['--scale-segment-width-px'], '20px');
 });
 
+test('updateDistanceScaleBar reflects zoomed viewport scale', () => {
+  const lineStyle = {
+    width: '',
+    values: {},
+    setProperty(name, value) {
+      this.values[name] = value;
+    },
+  };
+  const shell = {
+    distanceScale: {},
+    distanceScaleLine: { style: lineStyle },
+    distanceScaleLabel: { textContent: '' },
+    isochroneCanvas: {
+      getBoundingClientRect() {
+        return { width: 1000, height: 500 };
+      },
+    },
+  };
+  const graphHeader = {
+    originEasting: 0,
+    originNorthing: 0,
+    gridWidthPx: 1000,
+    gridHeightPx: 500,
+    pixelSizeM: 10,
+  };
+
+  updateDistanceScaleBar(shell, graphHeader, {
+    viewport: {
+      scale: 2,
+      offsetXPx: 250,
+      offsetYPx: 0,
+    },
+  });
+
+  assert.equal(shell.distanceScaleLine.style.width, '100px');
+  assert.equal(shell.distanceScaleLabel.textContent, '500 m');
+  assert.equal(shell.distanceScaleLine.style.values['--scale-segment-width-px'], '20px');
+});
+
+test('layoutMapViewportToContainGraph clears legacy contained-layout sizing', () => {
+  const style = {
+    values: {
+      '--map-aspect-ratio': '4 / 3',
+      '--map-aspect-ratio-num': '1.333333',
+    },
+    width: '400px',
+    height: '300px',
+    aspectRatio: '4 / 3',
+    transform: 'scale(2)',
+    transformOrigin: '0 0',
+    setProperty(name, value) {
+      this.values[name] = value;
+    },
+  };
+  const shell = {
+    canvasStack: {
+      style,
+    },
+  };
+
+  const result = layoutMapViewportToContainGraph(shell, {
+    originEasting: 0,
+    originNorthing: 0,
+    gridWidthPx: 4575,
+    gridHeightPx: 3743,
+    pixelSizeM: 10,
+  });
+
+  assert.equal(result.aspectRatio, 4575 / 3743);
+  assert.equal(style.values['--map-aspect-ratio'], '');
+  assert.equal(style.values['--map-aspect-ratio-num'], '');
+  assert.equal(style.width, '');
+  assert.equal(style.height, '');
+  assert.equal(style.aspectRatio, '');
+  assert.equal(style.transform, '');
+  assert.equal(style.transformOrigin, '');
+});
+
+test('drawBoundaryBasemapAlignedToGraphGrid sizes canvas to display frame and preserves equal x/y scale', () => {
+  const transformCalls = [];
+  const context = {
+    fillStyle: '',
+    strokeStyle: '',
+    lineWidth: 0,
+    lineJoin: '',
+    lineCap: '',
+    beginPath() {},
+    moveTo() {},
+    lineTo() {},
+    closePath() {},
+    fill() {},
+    stroke() {},
+    clearRect() {},
+    setTransform(...args) {
+      transformCalls.push(args);
+    },
+  };
+  const boundaryCanvas = {
+    width: 0,
+    height: 0,
+    getBoundingClientRect() {
+      return { width: 800, height: 300 };
+    },
+    getContext(kind) {
+      assert.equal(kind, '2d');
+      return context;
+    },
+  };
+  const graphHeader = {
+    originEasting: 0,
+    originNorthing: 0,
+    gridWidthPx: 400,
+    gridHeightPx: 300,
+    pixelSizeM: 1,
+  };
+  const payload = {
+    coordinate_space: {
+      width: 400,
+      height: 300,
+      x_origin: 0,
+      y_origin: 299,
+      axis: 'x-right-y-down',
+    },
+    features: [
+      {
+        name: 'frame',
+        paths: [
+          [
+            [0, 0],
+            [399, 0],
+            [399, 299],
+            [0, 299],
+            [0, 0],
+          ],
+        ],
+      },
+    ],
+  };
+
+  drawBoundaryBasemapAlignedToGraphGrid(boundaryCanvas, payload, graphHeader);
+
+  assert.equal(boundaryCanvas.width, 800);
+  assert.equal(boundaryCanvas.height, 300);
+  assert.deepEqual(transformCalls[0], [1, 0, 0, 1, 0, 0]);
+  assert.deepEqual(
+    transformCalls[1].map((value) => (Object.is(value, -0) ? 0 : value)),
+    [1, 0, 0, 1, 200, 0],
+  );
+  assert.equal(context.lineWidth, 1.2);
+});
+
+test('createWebGlIsochroneRenderer requests an anti-aliased WebGL context', () => {
+  const requestedContexts = [];
+  const canvas = {
+    getContext(kind, attributes) {
+      requestedContexts.push({ kind, attributes });
+      return null;
+    },
+  };
+
+  const renderer = createWebGlIsochroneRenderer(canvas);
+
+  assert.equal(renderer, null);
+  assert.deepEqual(
+    requestedContexts.map(({ kind, attributes }) => ({
+      kind,
+      antialias: attributes.antialias,
+      alpha: attributes.alpha,
+    })),
+    [
+      { kind: 'webgl2', antialias: true, alpha: true },
+      { kind: 'webgl', antialias: true, alpha: true },
+    ],
+  );
+});
+
 test('parseNodeIndexFromLocationSearch validates and clamps invalid params', () => {
   assert.equal(parseNodeIndexFromLocationSearch('?node=12', 100), 12);
   assert.equal(parseNodeIndexFromLocationSearch('?node=-1', 100), null);
   assert.equal(parseNodeIndexFromLocationSearch('?node=foo', 100), null);
   assert.equal(parseNodeIndexFromLocationSearch('?node=100', 100), null);
   assert.equal(parseNodeIndexFromLocationSearch('', 100), null);
+});
+
+test('parseLocationIdFromLocationSearch returns a trimmed region id when present', () => {
+  assert.equal(parseLocationIdFromLocationSearch('?region=rome'), 'rome');
+  assert.equal(parseLocationIdFromLocationSearch('?region=%20london%20'), 'london');
+  assert.equal(parseLocationIdFromLocationSearch('?region='), null);
+  assert.equal(parseLocationIdFromLocationSearch(''), null);
 });
 
 test('persistNodeIndexToLocation rewrites URL when the node actually changes', () => {
@@ -582,6 +881,30 @@ test('persistNodeIndexToLocation rewrites URL when the node actually changes', (
 
   locationObject.href = 'https://example.test/map?foo=bar&node=9#viewport';
   const unchanged = persistNodeIndexToLocation(9, { locationObject, historyObject });
+  assert.equal(unchanged, false);
+});
+
+test('persistLocationIdToLocation writes region query value, clears node, and preserves other params', () => {
+  const locationObject = {
+    href: 'https://example.test/map?foo=bar&node=123&modes=walk%2Ccar&cycle=75&lang=fr#viewport',
+  };
+  let replacedUrl = null;
+  const historyObject = {
+    replaceState(_state, _title, url) {
+      replacedUrl = url;
+    },
+  };
+
+  const changed = persistLocationIdToLocation('rome', { locationObject, historyObject });
+  assert.equal(changed, true);
+  assert.equal(
+    replacedUrl,
+    '/map?foo=bar&modes=walk%2Ccar&cycle=75&lang=fr&region=rome#viewport',
+  );
+
+  locationObject.href =
+    'https://example.test/map?foo=bar&modes=walk%2Ccar&cycle=75&lang=fr&region=rome#viewport';
+  const unchanged = persistLocationIdToLocation('rome', { locationObject, historyObject });
   assert.equal(unchanged, false);
 });
 

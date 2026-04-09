@@ -1,7 +1,9 @@
 import {
   COLOUR_CYCLE_QUERY_PARAM,
+  LANGUAGE_QUERY_PARAM,
   LAST_CLICKED_NODE_QUERY_PARAM,
   MODE_SELECTION_QUERY_PARAM,
+  SELECTED_REGION_QUERY_PARAM,
 } from '../config/constants.js';
 import { validateGraphForRouting } from './graph-validation.js';
 
@@ -93,6 +95,62 @@ export function persistNodeIndexToLocation(nodeIndex, options = {}) {
   }
 
   nextUrl.searchParams.set(LAST_CLICKED_NODE_QUERY_PARAM, nodeText);
+  historyObject.replaceState(null, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+  return true;
+}
+
+export function parseLocationIdFromLocationSearch(locationSearch) {
+  if (typeof locationSearch !== 'string' || locationSearch.length === 0) {
+    return null;
+  }
+
+  const params = new URLSearchParams(locationSearch);
+  const rawLocationId = params.get(SELECTED_REGION_QUERY_PARAM);
+  if (rawLocationId === null) {
+    return null;
+  }
+
+  const locationId = rawLocationId.trim();
+  return locationId.length > 0 ? locationId : null;
+}
+
+export function parseLanguageFromLocationSearch(locationSearch) {
+  if (typeof locationSearch !== 'string' || locationSearch.length === 0) {
+    return null;
+  }
+
+  const params = new URLSearchParams(locationSearch);
+  const rawLanguage = params.get(LANGUAGE_QUERY_PARAM);
+  if (rawLanguage === null) {
+    return null;
+  }
+
+  const language = rawLanguage.trim();
+  return language.length > 0 ? language : null;
+}
+
+export function persistLocationIdToLocation(locationId, options = {}) {
+  if (typeof locationId !== 'string' || locationId.trim().length === 0) {
+    throw new Error('locationId must be a non-empty string');
+  }
+
+  const locationObject = options.locationObject ?? globalThis.location ?? null;
+  const historyObject = options.historyObject ?? globalThis.history ?? null;
+  if (!locationObject || typeof locationObject.href !== 'string') {
+    return false;
+  }
+  if (!historyObject || typeof historyObject.replaceState !== 'function') {
+    return false;
+  }
+
+  const nextUrl = new URL(locationObject.href);
+  const normalizedLocationId = locationId.trim();
+  if (nextUrl.searchParams.get(SELECTED_REGION_QUERY_PARAM) === normalizedLocationId) {
+    return false;
+  }
+
+  nextUrl.searchParams.set(SELECTED_REGION_QUERY_PARAM, normalizedLocationId);
+  nextUrl.searchParams.delete(LAST_CLICKED_NODE_QUERY_PARAM);
   historyObject.replaceState(null, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
   return true;
 }

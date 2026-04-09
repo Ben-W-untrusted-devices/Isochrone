@@ -1,3 +1,16 @@
+import {
+  createDefaultMapViewport,
+  mapScreenCanvasPixelToGraphPixel,
+  panMapViewportByCanvasDelta,
+  resolveViewportFrame,
+  zoomMapViewportAtCanvasPixel,
+} from '../core/viewport.js';
+
+const NAVIGATION_DRAG_THRESHOLD_PX = 5;
+const MAX_VIEWPORT_SCALE = 8;
+const MIN_VIEWPORT_SCALE = 1;
+const WHEEL_ZOOM_SENSITIVITY = 0.0015;
+
 export function bindCanvasClickRouting(shell, mapData, options = {}, dependencies = {}) {
   if (!shell || !shell.isochroneCanvas) {
     throw new Error('shell.isochroneCanvas is required');
@@ -10,12 +23,15 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     findNearestNodeForCanvasPixel,
     getAllowedModeMaskFromShell,
     getColourCycleMinutesFromShell,
+    getRoutingFailedStatusText,
     mapClientPointToCanvasPixel,
     parseNodeIndexFromLocationSearch,
     persistNodeIndexToLocation,
     renderIsochroneLegendIfNeeded,
     runWalkingIsochroneFromSourceNode,
     setRoutingStatus,
+    updateDistanceScaleBar,
+    redrawViewport,
   } = dependencies;
 
   if (typeof findNearestNodeForCanvasPixel !== 'function') {
@@ -26,6 +42,9 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   }
   if (typeof getColourCycleMinutesFromShell !== 'function') {
     throw new Error('dependencies.getColourCycleMinutesFromShell must be a function');
+  }
+  if (getRoutingFailedStatusText !== undefined && typeof getRoutingFailedStatusText !== 'function') {
+    throw new Error('dependencies.getRoutingFailedStatusText must be a function when provided');
   }
   if (typeof mapClientPointToCanvasPixel !== 'function') {
     throw new Error('dependencies.mapClientPointToCanvasPixel must be a function');
@@ -45,20 +64,33 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   if (typeof setRoutingStatus !== 'function') {
     throw new Error('dependencies.setRoutingStatus must be a function');
   }
+  if (updateDistanceScaleBar !== undefined && typeof updateDistanceScaleBar !== 'function') {
+    throw new Error('dependencies.updateDistanceScaleBar must be a function when provided');
+  }
+  if (redrawViewport !== undefined && typeof redrawViewport !== 'function') {
+    throw new Error('dependencies.redrawViewport must be a function when provided');
+  }
 
   const incrementalRender = options.incrementalRender ?? false;
+  const autoStartFromLocation = options.autoStartFromLocation ?? true;
   if (typeof incrementalRender !== 'boolean') {
     throw new Error('options.incrementalRender must be a boolean when provided');
+  }
+  if (typeof autoStartFromLocation !== 'boolean') {
+    throw new Error('options.autoStartFromLocation must be a boolean when provided');
   }
 
   let activeRunToken = null;
   let isDisposed = false;
-  let isPointerDown = false;
+  let activePointerGesture = null;
   let queuedClientPoint = null;
   let queuedNodeIndex = null;
   let lastCompletedClientPoint = null;
   let lastCompletedNodeIndex = null;
   let idleWaiterResolvers = [];
+  if (!mapData.viewport) {
+    mapData.viewport = createDefaultMapViewport();
+  }
 
   const isRoutingIdle = () =>
     activeRunToken === null && queuedNodeIndex === null && queuedClientPoint === null;
@@ -185,7 +217,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     }
 
     await queuedRunPromise.catch((error) => {
-      setRoutingStatus(shell, 'Routing failed.');
+      setRoutingStatus(shell, getRoutingFailedStatusText?.(shell) ?? 'Routing failed.');
       console.error(error);
     });
 
@@ -199,10 +231,19 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     if (isDisposed) {
       return;
     }
-    const { xPx, yPx } = mapClientPointToCanvasPixel(
+    const screenCanvasPixel = mapClientPointToCanvasPixel(
       shell.isochroneCanvas,
       clientX,
       clientY,
+    );
+    const viewportFrame = resolveViewportFrame(mapData.graph.header, mapData.viewport, {
+      frameWidthPx: shell.isochroneCanvas.width,
+      frameHeightPx: shell.isochroneCanvas.height,
+    });
+    const { xPx, yPx } = mapScreenCanvasPixelToGraphPixel(
+      viewportFrame,
+      screenCanvasPixel.xPx,
+      screenCanvasPixel.yPx,
     );
     if (queuedClientPoint !== null && queuedClientPoint.xPx === xPx && queuedClientPoint.yPx === yPx) {
       return;
@@ -278,21 +319,21 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     }
   };
 
-  const isPrimaryPointerEvent = (event) => {
-    if (Number.isInteger(event.button) && event.button !== 0) {
-      return false;
-    }
-    if (Number.isInteger(event.buttons) && event.buttons !== 0 && (event.buttons & 1) === 0) {
-      return false;
-    }
-    return true;
-  };
+  const getPointerActions = () =>
+    shell.invertPointerButtonsInput?.checked === true
+      ? { navigateButton: 2, selectButton: 0 }
+      : { navigateButton: 0, selectButton: 2 };
 
-  const handlePointerDown = (event) => {
-    if (!isPrimaryPointerEvent(event)) {
-      return;
-    }
-    isPointerDown = true;
+  const beginPointerGesture = (event, action) => {
+    activePointerGesture = {
+      action,
+      pointerId: Number.isInteger(event.pointerId) ? event.pointerId : null,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      lastClientX: event.clientX,
+      lastClientY: event.clientY,
+      dragged: false,
+    };
     if (
       typeof shell.isochroneCanvas.setPointerCapture === 'function'
       && Number.isInteger(event.pointerId)
@@ -301,33 +342,112 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     }
   };
 
+  const handlePointerDown = (event) => {
+    if (isDisposed || activePointerGesture !== null) {
+      return;
+    }
+    if (event.pointerType !== 'mouse') {
+      beginPointerGesture(event, 'select');
+      return;
+    }
+    const { navigateButton, selectButton } = getPointerActions();
+    if (event.button === navigateButton) {
+      beginPointerGesture(event, 'navigate');
+      return;
+    }
+    if (event.button === selectButton) {
+      if (typeof event.preventDefault === 'function') {
+        event.preventDefault();
+      }
+      beginPointerGesture(event, 'select');
+      return;
+    }
+  };
+
   const handlePointerMove = (event) => {
-    if (!isPointerDown) {
+    if (
+      activePointerGesture === null
+      || (
+        activePointerGesture.pointerId !== null
+        && Number.isInteger(event.pointerId)
+        && event.pointerId !== activePointerGesture.pointerId
+      )
+    ) {
       return;
     }
-    if (Number.isInteger(event.buttons) && (event.buttons & 1) === 0) {
+
+    if (activePointerGesture.action === 'navigate') {
+      if (!isPointerButtonPressed(event, getPointerActions().navigateButton)) {
+        releasePointerCaptureIfHeld(event);
+        activePointerGesture = null;
+        return;
+      }
+
+      const totalDeltaX = event.clientX - activePointerGesture.startClientX;
+      const totalDeltaY = event.clientY - activePointerGesture.startClientY;
+      if (
+        !activePointerGesture.dragged
+        && Math.hypot(totalDeltaX, totalDeltaY) < NAVIGATION_DRAG_THRESHOLD_PX
+      ) {
+        return;
+      }
+
+      const deltaX = event.clientX - activePointerGesture.lastClientX;
+      const deltaY = event.clientY - activePointerGesture.lastClientY;
+      activePointerGesture.dragged = true;
+      updateViewportByClientDelta(deltaX, deltaY);
+      activePointerGesture.lastClientX = event.clientX;
+      activePointerGesture.lastClientY = event.clientY;
+      return;
+    }
+
+    if (!isPointerButtonPressed(event, getPointerActions().selectButton)) {
       queueLatestRunAtClientPoint(event.clientX, event.clientY);
-      isPointerDown = false;
       releasePointerCaptureIfHeld(event);
+      activePointerGesture = null;
       return;
     }
+
     queueLatestRunAtClientPoint(event.clientX, event.clientY);
   };
 
   const handlePointerUp = (event) => {
-    if (!isPrimaryPointerEvent(event)) {
+    if (
+      activePointerGesture === null
+      || (
+        activePointerGesture.pointerId !== null
+        && Number.isInteger(event.pointerId)
+        && event.pointerId !== activePointerGesture.pointerId
+      )
+    ) {
       return;
     }
-    if (!isPointerDown) {
-      return;
+
+    if (
+      activePointerGesture.action === 'select'
+      || !activePointerGesture.dragged
+    ) {
+      queueLatestRunAtClientPoint(event.clientX, event.clientY);
     }
-    queueLatestRunAtClientPoint(event.clientX, event.clientY);
-    isPointerDown = false;
     releasePointerCaptureIfHeld(event);
+    activePointerGesture = null;
+  };
+
+  const handleWheel = (event) => {
+    if (typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
+    zoomViewportAtClientPoint(event.clientX, event.clientY, event.deltaY);
+  };
+
+  const handleContextMenu = (event) => {
+    if (typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
   };
 
   const handlePointerCancel = (event) => {
-    isPointerDown = false;
+    activePointerGesture = null;
     releasePointerCaptureIfHeld(event);
   };
 
@@ -335,17 +455,21 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   shell.isochroneCanvas.addEventListener('pointermove', handlePointerMove);
   shell.isochroneCanvas.addEventListener('pointerup', handlePointerUp);
   shell.isochroneCanvas.addEventListener('pointercancel', handlePointerCancel);
+  shell.isochroneCanvas.addEventListener('wheel', handleWheel, { passive: false });
+  shell.isochroneCanvas.addEventListener('contextmenu', handleContextMenu);
 
-  const initialNodeIndex = parseNodeIndexFromLocationSearch(
-    globalThis.location?.search ?? '',
-    mapData.graph.header.nNodes,
-  );
-  if (initialNodeIndex !== null) {
-    const allowedModeMask = getAllowedModeMaskFromShell(shell);
-    void runFromNodeIndex(initialNodeIndex, allowedModeMask).catch((error) => {
-      setRoutingStatus(shell, 'Routing failed.');
-      console.error(error);
-    });
+  if (autoStartFromLocation) {
+    const initialNodeIndex = parseNodeIndexFromLocationSearch(
+      globalThis.location?.search ?? '',
+      mapData.graph.header.nNodes,
+    );
+    if (initialNodeIndex !== null) {
+      const allowedModeMask = getAllowedModeMaskFromShell(shell);
+      void runFromNodeIndex(initialNodeIndex, allowedModeMask).catch((error) => {
+        setRoutingStatus(shell, getRoutingFailedStatusText?.(shell) ?? 'Routing failed.');
+        console.error(error);
+      });
+    }
   }
 
   const dispose = () => {
@@ -358,7 +482,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
       activeRunToken.cancelled = true;
       activeRunToken = null;
     }
-    isPointerDown = false;
+    activePointerGesture = null;
     queuedClientPoint = null;
     queuedNodeIndex = null;
     lastCompletedClientPoint = null;
@@ -369,10 +493,15 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     shell.isochroneCanvas.removeEventListener('pointermove', handlePointerMove);
     shell.isochroneCanvas.removeEventListener('pointerup', handlePointerUp);
     shell.isochroneCanvas.removeEventListener('pointercancel', handlePointerCancel);
+    shell.isochroneCanvas.removeEventListener('wheel', handleWheel);
+    shell.isochroneCanvas.removeEventListener('contextmenu', handleContextMenu);
   };
 
   return {
     dispose,
+    getViewportState() {
+      return { ...mapData.viewport };
+    },
     runFromCanvasPixel,
     requestIsochroneRedraw,
     waitForIdle() {
@@ -384,4 +513,92 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
       });
     },
   };
+  function updateViewportByClientDelta(deltaClientX, deltaClientY) {
+    const canvasRect = shell.isochroneCanvas.getBoundingClientRect();
+    if (!(canvasRect.width > 0) || !(canvasRect.height > 0)) {
+      return false;
+    }
+    const deltaCanvasX = (deltaClientX / canvasRect.width) * shell.isochroneCanvas.width;
+    const deltaCanvasY = (deltaClientY / canvasRect.height) * shell.isochroneCanvas.height;
+    const nextViewport = panMapViewportByCanvasDelta(
+      mapData.graph.header,
+      mapData.viewport,
+      deltaCanvasX,
+      deltaCanvasY,
+      {
+        frameWidthPx: shell.isochroneCanvas.width,
+        frameHeightPx: shell.isochroneCanvas.height,
+        minScale: MIN_VIEWPORT_SCALE,
+        maxScale: MAX_VIEWPORT_SCALE,
+      },
+    );
+    return applyViewport(nextViewport, { updateScaleBar: false });
+  }
+
+  function zoomViewportAtClientPoint(clientX, clientY, deltaY) {
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY) || !Number.isFinite(deltaY)) {
+      return false;
+    }
+    const anchorCanvasPixel = mapClientPointToCanvasPixel(shell.isochroneCanvas, clientX, clientY);
+    const zoomFactor = Math.exp(-deltaY * WHEEL_ZOOM_SENSITIVITY);
+    const nextViewport = zoomMapViewportAtCanvasPixel(
+      mapData.graph.header,
+      mapData.viewport,
+      anchorCanvasPixel.xPx,
+      anchorCanvasPixel.yPx,
+      zoomFactor,
+      {
+        frameWidthPx: shell.isochroneCanvas.width,
+        frameHeightPx: shell.isochroneCanvas.height,
+        minScale: MIN_VIEWPORT_SCALE,
+        maxScale: MAX_VIEWPORT_SCALE,
+      },
+    );
+    return applyViewport(nextViewport, { updateScaleBar: true });
+  }
+
+  function applyViewport(nextViewport, applyOptions = {}) {
+    if (!nextViewport) {
+      return false;
+    }
+    const currentViewport = mapData.viewport ?? createDefaultMapViewport();
+    if (
+      currentViewport.scale === nextViewport.scale
+      && currentViewport.offsetXPx === nextViewport.offsetXPx
+      && currentViewport.offsetYPx === nextViewport.offsetYPx
+    ) {
+      return false;
+    }
+    mapData.viewport = nextViewport;
+    if (applyOptions.updateScaleBar === true && typeof updateDistanceScaleBar === 'function') {
+      updateDistanceScaleBar(shell, mapData.graph.header, { viewport: mapData.viewport });
+    }
+    if (typeof redrawViewport === 'function') {
+      redrawViewport(shell, mapData);
+    }
+    return true;
+  }
+}
+
+function getPointerButtonMask(button) {
+  if (button === 0) {
+    return 1;
+  }
+  if (button === 1) {
+    return 4;
+  }
+  if (button === 2) {
+    return 2;
+  }
+  return 0;
+}
+
+function isPointerButtonPressed(event, button) {
+  if (!Number.isInteger(button) || button < 0) {
+    return false;
+  }
+  if (Number.isInteger(event.buttons)) {
+    return (event.buttons & getPointerButtonMask(button)) !== 0;
+  }
+  return event.button === button;
 }

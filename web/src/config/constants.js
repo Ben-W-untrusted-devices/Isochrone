@@ -1,7 +1,11 @@
+export const DEFAULT_BOUNDARY_FILE_NAME = 'berlin-district-boundaries-canvas.json';
+export const DEFAULT_GRAPH_FILE_NAME = 'graph-walk.bin.gz';
 export const DEFAULT_BOUNDARY_BASEMAP_URL =
-  '../data_pipeline/output/berlin-district-boundaries-canvas.json';
-export const DEFAULT_GRAPH_BINARY_URL = '../data_pipeline/output/graph-walk.bin.gz';
+  `../data_pipeline/output/${DEFAULT_BOUNDARY_FILE_NAME}`;
+export const DEFAULT_GRAPH_BINARY_URL = `../data_pipeline/output/${DEFAULT_GRAPH_FILE_NAME}`;
 export const DEFAULT_LOCATION_NAME = 'Berlin';
+export const DEFAULT_LOCATION_ID = 'berlin';
+export const DEFAULT_LOCATION_REGISTRY_URL = '../data/locations.json';
 export const GRAPH_MAGIC = 0x49534f43;
 
 export const HEADER_SIZE = 64;
@@ -19,6 +23,8 @@ export const ROAD_CLASS_MOTORWAY = 15;
 export const DEFAULT_COLOUR_CYCLE_MINUTES = 75;
 export const LOADING_FADE_MS = 180;
 export const LAST_CLICKED_NODE_QUERY_PARAM = 'node';
+export const SELECTED_REGION_QUERY_PARAM = 'region';
+export const LANGUAGE_QUERY_PARAM = 'lang';
 export const MODE_SELECTION_QUERY_PARAM = 'modes';
 export const COLOUR_CYCLE_QUERY_PARAM = 'cycle';
 export const EDGE_INTERPOLATION_SLACK_SECONDS = 0.75;
