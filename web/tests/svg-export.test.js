@@ -35,42 +35,120 @@ function flushTasks() {
   });
 }
 
-test('buildRenderedIsochroneSvgDocument layers boundary image and vector isochrone edges', () => {
+function createGraphHeader() {
+  return {
+    originEasting: 0,
+    originNorthing: 0,
+    gridWidthPx: 100,
+    gridHeightPx: 100,
+    pixelSizeM: 1,
+  };
+}
+
+function createBoundaryPayload() {
+  return {
+    coordinate_space: {
+      x_origin: 0,
+      y_origin: 99,
+      width: 100,
+      height: 100,
+      axis: 'x-right-y-down',
+    },
+    features: [
+      {
+        name: 'Test boundary',
+        relation_id: 1,
+        paths: [[[10, 10], [20, 20], [30, 30]]],
+      },
+    ],
+  };
+}
+
+function createComputedStyleStub(valuesByElement = new Map()) {
+  return (element) => {
+    const values = valuesByElement.get(element) ?? {};
+    return {
+      backgroundColor: values.backgroundColor ?? 'transparent',
+      getPropertyValue(name) {
+        return values[name] ?? '';
+      },
+    };
+  };
+}
+
+test('buildIsochroneEdgeLineMarkup skips hidden edges and applies theme palette', () => {
+  const markup = buildIsochroneEdgeLineMarkup(
+    new Float32Array([
+      1,
+      2,
+      -1,
+      3,
+      4,
+      -1,
+      10,
+      12,
+      0,
+      22,
+      24,
+      60,
+    ]),
+    { cycleMinutes: 75, theme: 'light' },
+  );
+
+  assert.equal(markup.match(/<line /g)?.length ?? 0, 1);
+  assert.ok(markup.includes('stroke="rgb(0, 110, 210)"'));
+  assert.ok(!markup.includes('x1="1"'));
+});
+
+test('buildRenderedIsochroneSvgDocument uses vector boundaries and shared viewport alignment', () => {
   const svg = buildRenderedIsochroneSvgDocument({
-    widthPx: 640,
-    heightPx: 480,
-    boundaryLayerDataUrl: 'data:image/png;base64,AAA',
-    backgroundColor: 'rgb(17, 24, 32)',
-    edgeVertexData: new Float32Array([10, 12, 0, 22, 24, 0]),
-    title: 'Isochrone of Berlin, by Car',
+    widthPx: 100,
+    heightPx: 100,
+    backgroundColour: '#111820',
+    graphHeader: createGraphHeader(),
+    boundaryPayload: createBoundaryPayload(),
+    viewport: {
+      scale: 2,
+      offsetXPx: 5,
+      offsetYPx: 3,
+    },
+    edgeVertexData: new Float32Array([10, 10, 0, 20, 20, 60]),
+    title: 'Isochrone of Test, by Car',
     scaleBarLabel: '1 km',
     scaleBarWidthPx: 96,
-    copyrightNotice:
-      'Map data © OpenStreetMap contributors, available under the Open Database License (ODbL): https://www.openstreetmap.org/copyright',
+    scaleBarSegmentWidthPx: 24,
+    overlayColours: {
+      overlayBackground: 'rgba(4, 12, 18, 0.88)',
+      overlayBorder: 'rgba(130, 170, 210, 0.55)',
+      overlayText: '#dceaf8',
+      overlayNote: '#c0d4e8',
+      scaleLineBackground: '#f6fbff',
+      scaleLineAlternate: '#31577a',
+      scaleLineBorder: '#c1d6e9',
+      boundaryStroke: 'rgba(125, 175, 220, 0.55)',
+    },
   });
 
-  assert.ok(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"'));
-  assert.ok(svg.includes('viewBox="0 0 640 480"'));
-  assert.ok(svg.includes('<title>Isochrone of Berlin, by Car</title>'));
-  assert.ok(svg.includes('>Isochrone of Berlin, by Car<'));
-  assert.ok(svg.includes('id="isochrone-background"'));
-  assert.ok(svg.includes('fill="rgb(17, 24, 32)"'));
-  assert.ok(svg.includes('href="data:image/png;base64,AAA"'));
-  assert.ok(svg.includes('<g id="isochrone-edges">'));
-  assert.ok(svg.includes('stroke="rgb(0, 255, 255)"'));
-  assert.ok(svg.includes('id="isochrone-legend"'));
-  assert.ok(svg.includes('Colours repeat every'));
-  assert.ok(svg.includes('id="isochrone-scale"'));
-  assert.ok(svg.includes('>1 km<'));
-  assert.ok(svg.includes('id="isochrone-copyright"'));
+  assert.ok(svg.startsWith('<?xml version="1.0" encoding="UTF-8"?>'));
+  assert.ok(svg.includes('<svg xmlns="http://www.w3.org/2000/svg"'));
+  assert.ok(svg.includes('viewBox="0 0 100 100"'));
+  assert.ok(!svg.includes('<image '));
+  assert.ok(svg.includes('id="isochrone-boundaries"'));
+  assert.ok(svg.includes('d="M 10 14 L 30 34 L 50 54"'));
+  assert.ok(svg.includes('x1="10"'));
+  assert.ok(svg.includes('y1="14"'));
+  assert.ok(svg.includes('x2="30"'));
+  assert.ok(svg.includes('y2="34"'));
 });
 
 test('buildRenderedIsochroneSvgDocument localizes legend note and range labels', () => {
   const svg = buildRenderedIsochroneSvgDocument({
-    widthPx: 640,
-    heightPx: 480,
-    boundaryLayerDataUrl: 'data:image/png;base64,AAA',
-    edgeVertexData: new Float32Array([10, 12, 0, 22, 24, 0]),
+    widthPx: 100,
+    heightPx: 100,
+    backgroundColour: '#111820',
+    graphHeader: createGraphHeader(),
+    boundaryPayload: createBoundaryPayload(),
+    edgeVertexData: new Float32Array([10, 10, 0, 20, 20, 60]),
     cycleMinutes: 120,
     messages: {
       'legend.duration.minuteOnly': '{minutes} Min.',
@@ -79,19 +157,75 @@ test('buildRenderedIsochroneSvgDocument localizes legend note and range labels',
       'legend.range': '{start}–{end}',
       'legend.repeat': 'Farben wiederholen sich alle {duration}.',
     },
+    overlayColours: {
+      overlayBackground: 'rgba(4, 12, 18, 0.88)',
+      overlayBorder: 'rgba(130, 170, 210, 0.55)',
+      overlayText: '#dceaf8',
+      overlayNote: '#c0d4e8',
+      scaleLineBackground: '#f6fbff',
+      scaleLineAlternate: '#31577a',
+      scaleLineBorder: '#c1d6e9',
+      boundaryStroke: 'rgba(125, 175, 220, 0.55)',
+    },
   });
 
   assert.ok(svg.includes('48 Min.–1 Std. 12 Min.'));
   assert.ok(svg.includes('Farben wiederholen sich alle 2 Std.'));
 });
 
+test('buildRenderedIsochroneSvgDocument uses theme-derived overlay colours and patterned scale bar', () => {
+  const svg = buildRenderedIsochroneSvgDocument({
+    widthPx: 100,
+    heightPx: 100,
+    backgroundColour: '#ffffff',
+    graphHeader: createGraphHeader(),
+    boundaryPayload: createBoundaryPayload(),
+    edgeVertexData: new Float32Array([10, 10, 0, 20, 20, 60]),
+    scaleBarLabel: '1 km',
+    scaleBarWidthPx: 96,
+    scaleBarSegmentWidthPx: 24,
+    theme: 'light',
+    overlayColours: {
+      overlayBackground: 'rgba(251, 253, 255, 0.92)',
+      overlayBorder: 'rgba(97, 130, 159, 0.62)',
+      overlayText: '#173750',
+      overlayNote: '#365772',
+      scaleLineBackground: '#21435d',
+      scaleLineAlternate: '#eef5fb',
+      scaleLineBorder: '#21435d',
+      boundaryStroke: 'rgba(58, 94, 126, 0.62)',
+    },
+  });
+
+  assert.ok(svg.includes('fill="rgba(251, 253, 255, 0.92)"'));
+  assert.ok(svg.includes('stroke="rgba(97, 130, 159, 0.62)"'));
+  assert.ok(svg.includes('fill="#173750"'));
+  assert.ok(svg.includes('fill="#365772"'));
+  assert.ok(svg.includes('stroke="rgb(0, 110, 210)"'));
+  assert.ok(svg.includes('id="isochrone-scale-pattern"'));
+  assert.ok(svg.includes('fill="#21435d"'));
+  assert.ok(svg.includes('fill="#eef5fb"'));
+});
+
 test('buildRenderedIsochroneSvgDocument escapes title text', () => {
   const svg = buildRenderedIsochroneSvgDocument({
-    widthPx: 2,
-    heightPx: 2,
-    boundaryLayerDataUrl: 'data:image/png;base64,AAA',
-    edgeVertexData: new Float32Array([0, 0, 0, 1, 1, 0]),
+    widthPx: 100,
+    heightPx: 100,
+    backgroundColour: '#111820',
+    graphHeader: createGraphHeader(),
+    boundaryPayload: createBoundaryPayload(),
+    edgeVertexData: new Float32Array([10, 10, 0, 20, 20, 60]),
     title: 'Berlin <Isochrone> & "Legend"',
+    overlayColours: {
+      overlayBackground: 'rgba(4, 12, 18, 0.88)',
+      overlayBorder: 'rgba(130, 170, 210, 0.55)',
+      overlayText: '#dceaf8',
+      overlayNote: '#c0d4e8',
+      scaleLineBackground: '#f6fbff',
+      scaleLineAlternate: '#31577a',
+      scaleLineBorder: '#c1d6e9',
+      boundaryStroke: 'rgba(125, 175, 220, 0.55)',
+    },
   });
 
   assert.ok(svg.includes('<title>Berlin &lt;Isochrone&gt; &amp; &quot;Legend&quot;</title>'));
@@ -105,13 +239,6 @@ test('buildSvgExportFilename formats local timestamp deterministically', () => {
 test('formatIsochroneExportTitle composes location and transport mode labels', () => {
   const title = formatIsochroneExportTitle('Berlin', ['Walk', 'Bike', 'Car']);
   assert.equal(title, 'Isochrone of Berlin, by Walk, Bike, Car');
-});
-
-test('buildIsochroneEdgeLineMarkup renders one SVG line per edge segment', () => {
-  const markup = buildIsochroneEdgeLineMarkup(new Float32Array([1, 2, 0, 3, 4, 0]));
-  assert.ok(markup.includes('<line'));
-  assert.ok(markup.includes('x1="1"'));
-  assert.ok(markup.includes('y2="4"'));
 });
 
 test('bindSvgExportControl invokes export callback on button click', async () => {
@@ -159,7 +286,7 @@ test('bindSvgExportControl forwards errors to onExportError callback', () => {
   binding.dispose();
 });
 
-test('exportCurrentRenderedIsochroneSvg emits downloadable vector SVG', () => {
+test('exportCurrentRenderedIsochroneSvg emits downloadable vector SVG with current theme colours', () => {
   let appendedNode = null;
   let clicked = 0;
   let removed = 0;
@@ -176,7 +303,9 @@ test('exportCurrentRenderedIsochroneSvg emits downloadable vector SVG', () => {
       removed += 1;
     },
   };
+  const documentElement = { dataset: { theme: 'light' } };
   const documentObject = {
+    documentElement,
     body: {
       appendChild(node) {
         appendedNode = node;
@@ -197,30 +326,44 @@ test('exportCurrentRenderedIsochroneSvg emits downloadable vector SVG', () => {
   };
   const shell = {
     boundaryCanvas: {
-      toDataURL() {
-        return 'data:image/png;base64,AAA';
-      },
+      width: 100,
+      height: 100,
+      ownerDocument: documentObject,
     },
     isochroneCanvas: {
       width: 100,
-      height: 80,
+      height: 100,
+      ownerDocument: documentObject,
     },
     mapRegion: { id: 'map-region' },
   };
-  const getComputedStyleImpl = (node) => {
-    if (node === shell.isochroneCanvas) {
-      return { backgroundColor: 'rgba(0, 0, 0, 0)' };
-    }
-    if (node === shell.mapRegion) {
-      return { backgroundColor: 'rgb(17, 24, 32)' };
-    }
-    return { backgroundColor: 'transparent' };
-  };
+  const styleValues = new Map([
+    [
+      documentElement,
+      {
+        backgroundColor: '#eef2f5',
+        '--map-overlay-bg': 'rgba(251, 253, 255, 0.92)',
+        '--map-overlay-border': 'rgba(97, 130, 159, 0.62)',
+        '--map-overlay-text': '#173750',
+        '--map-overlay-note': '#365772',
+        '--map-scale-line-bg': '#21435d',
+        '--map-scale-line-alt': '#eef5fb',
+        '--map-scale-line-border': '#21435d',
+      },
+    ],
+    [shell.mapRegion, { backgroundColor: '#ffffff' }],
+  ]);
 
   const result = exportCurrentRenderedIsochroneSvg(shell, {
-    edgeVertexData: new Float32Array([0, 0, 0, 10, 10, 0]),
-    filename: 'isochrone-test.svg',
-    getComputedStyleImpl,
+    graphHeader: createGraphHeader(),
+    boundaryPayload: createBoundaryPayload(),
+    edgeVertexData: new Float32Array([10, 10, 0, 20, 20, 60]),
+    title: 'Isochrone of Test, by Car',
+    scaleBarLabel: '1 km',
+    scaleBarWidthPx: 96,
+    scaleBarSegmentWidthPx: 24,
+    theme: 'light',
+    getComputedStyleImpl: createComputedStyleStub(styleValues),
     documentObject,
     urlObject,
     scheduleRevoke(callback) {
@@ -228,31 +371,21 @@ test('exportCurrentRenderedIsochroneSvg emits downloadable vector SVG', () => {
     },
   });
 
-  assert.equal(result.filename, 'isochrone-test.svg');
-  assert.ok(result.svgDocument.includes('id="isochrone-background"'));
-  assert.ok(result.svgDocument.includes('fill="rgb(17, 24, 32)"'));
-  assert.ok(result.svgDocument.includes('<line'));
+  assert.equal(result.filename.endsWith('.svg'), true);
+  assert.ok(result.svgDocument.includes('fill="#ffffff"'));
+  assert.ok(result.svgDocument.includes('fill="rgba(251, 253, 255, 0.92)"'));
+  assert.ok(result.svgDocument.includes('stroke="rgb(0, 110, 210)"'));
+  assert.ok(result.svgDocument.includes('id="isochrone-boundaries"'));
   assert.equal(appendedNode, anchor);
-  assert.equal(anchor.download, 'isochrone-test.svg');
   assert.equal(anchor.href, 'blob:test');
   assert.equal(clicked, 1);
   assert.equal(removed, 1);
   assert.equal(revokedUrl, 'blob:test');
 });
 
-test('exportCurrentRenderedIsochroneSvg allows empty edge data for blank-map export', () => {
-  const shell = {
-    boundaryCanvas: {
-      toDataURL() {
-        return 'data:image/png;base64,AAA';
-      },
-    },
-    isochroneCanvas: {
-      width: 100,
-      height: 80,
-    },
-  };
+test('exportCurrentRenderedIsochroneSvg allows blank isochrone export when no routed edges are available', () => {
   const documentObject = {
+    documentElement: {},
     body: {
       appendChild() {},
     },
@@ -270,8 +403,22 @@ test('exportCurrentRenderedIsochroneSvg allows empty edge data for blank-map exp
     },
     revokeObjectURL() {},
   };
+  const shell = {
+    boundaryCanvas: {
+      width: 100,
+      height: 100,
+      ownerDocument: documentObject,
+    },
+    isochroneCanvas: {
+      width: 100,
+      height: 100,
+      ownerDocument: documentObject,
+    },
+  };
 
   const result = exportCurrentRenderedIsochroneSvg(shell, {
+    graphHeader: createGraphHeader(),
+    boundaryPayload: createBoundaryPayload(),
     documentObject,
     urlObject,
     scheduleRevoke(callback) {
@@ -280,6 +427,7 @@ test('exportCurrentRenderedIsochroneSvg allows empty edge data for blank-map exp
   });
 
   assert.ok(result.svgDocument.includes('<g id="isochrone-edges">'));
+  assert.ok(result.svgDocument.includes('id="isochrone-boundaries"'));
 });
 
 test('bindSvgExportControl handles async export callback resolution', async () => {

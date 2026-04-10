@@ -37,6 +37,12 @@ import {
   resolveViewportFrame,
 } from './core/viewport.js';
 import {
+  getBoundaryStrokeStyle,
+  isClosedPath,
+  parseBoundaryBasemapPayload,
+  projectBoundaryBasemapToGraphPaths,
+} from './core/boundary-basemap.js';
+import {
   buildLocationAssetUrls,
   localizeLocationRegistry,
   loadLocationRegistry,
@@ -1420,95 +1426,6 @@ export function getOrBuildEdgeTraversalCostTicksForMode(
   return edgeTraversalCostTicks;
 }
 
-export function parseBoundaryBasemapPayload(payload) {
-  if (!payload || typeof payload !== 'object') {
-    throw new Error('boundary payload must be an object');
-  }
-
-  const coordinateSpace = payload.coordinate_space;
-  if (!coordinateSpace || typeof coordinateSpace !== 'object') {
-    throw new Error('boundary payload is missing coordinate_space');
-  }
-
-  const width = asFiniteNumber(coordinateSpace.width, 'coordinate_space.width');
-  const height = asFiniteNumber(coordinateSpace.height, 'coordinate_space.height');
-  const xOrigin = asFiniteNumber(coordinateSpace.x_origin, 'coordinate_space.x_origin');
-  const yOrigin = asFiniteNumber(coordinateSpace.y_origin, 'coordinate_space.y_origin');
-  const axis =
-    typeof coordinateSpace.axis === 'string' ? coordinateSpace.axis : 'x-right-y-down';
-
-  if (width <= 0 || height <= 0) {
-    throw new Error('coordinate_space width/height must be positive');
-  }
-  if (axis !== 'x-right-y-down') {
-    throw new Error(`unsupported boundary coordinate_space.axis: ${axis}`);
-  }
-
-  const rawFeatures = payload.features;
-  if (!Array.isArray(rawFeatures)) {
-    throw new Error('boundary payload is missing features[]');
-  }
-
-  const features = rawFeatures
-    .map((feature, featureIndex) => {
-      if (!feature || typeof feature !== 'object') {
-        throw new Error(`features[${featureIndex}] must be an object`);
-      }
-
-      const name = typeof feature.name === 'string' ? feature.name : `feature_${featureIndex}`;
-      const relationId = Number.isFinite(feature.relation_id) ? feature.relation_id : null;
-
-      if (!Array.isArray(feature.paths)) {
-        throw new Error(`features[${featureIndex}].paths must be an array`);
-      }
-
-      const paths = feature.paths
-        .map((path, pathIndex) => {
-          if (!Array.isArray(path)) {
-            throw new Error(`features[${featureIndex}].paths[${pathIndex}] must be an array`);
-          }
-
-          const points = path.map((point, pointIndex) =>
-            parseCoordinatePair(
-              point,
-              `features[${featureIndex}].paths[${pathIndex}][${pointIndex}]`,
-            ),
-          );
-
-          return points;
-        })
-        .filter((path) => path.length >= 2);
-
-      return {
-        name,
-        relationId,
-        paths,
-      };
-    })
-    .filter((feature) => feature.paths.length > 0);
-
-  if (features.length === 0) {
-    throw new Error('boundary payload has no drawable paths');
-  }
-
-  return {
-    coordinateSpace: {
-      xOrigin,
-      yOrigin,
-      width,
-      height,
-      axis,
-    },
-    features,
-  };
-}
-
-function getBoundaryStrokeStyle(colourTheme) {
-  return normalizeIsochroneTheme(colourTheme, 'dark') === 'light'
-    ? 'rgba(58, 94, 126, 0.62)'
-    : 'rgba(125, 175, 220, 0.55)';
-}
-
 function syncCanvasToDisplaySize(canvas) {
   if (!canvas || typeof canvas.getBoundingClientRect !== 'function') {
     return false;
@@ -1540,7 +1457,7 @@ export function drawBoundaryBasemapAlignedToGraphGrid(
   }
   validateGraphHeaderForBoundaryAlignment(graphHeader);
 
-  const parsedBoundary = parseBoundaryBasemapPayload(payload);
+  const projectedBoundary = projectBoundaryBasemapToGraphPaths(payload, graphHeader);
   const context = boundaryCanvas.getContext('2d');
   if (!context) {
     throw new Error('Unable to get 2D context for boundary canvas');
@@ -1568,10 +1485,9 @@ export function drawBoundaryBasemapAlignedToGraphGrid(
     -viewportFrame.offsetYPx * viewportFrame.effectiveScale,
   );
 
-  const maxY = graphHeader.gridHeightPx - 1;
   let renderedPathCount = 0;
 
-  for (const feature of parsedBoundary.features) {
+  for (const feature of projectedBoundary.features) {
     for (const path of feature.paths) {
       if (path.length < 2) {
         continue;
@@ -1580,10 +1496,8 @@ export function drawBoundaryBasemapAlignedToGraphGrid(
       context.beginPath();
       for (let i = 0; i < path.length; i += 1) {
         const point = path[i];
-        const easting = parsedBoundary.coordinateSpace.xOrigin + point[0];
-        const northing = parsedBoundary.coordinateSpace.yOrigin - point[1];
-        const xPx = (easting - graphHeader.originEasting) / graphHeader.pixelSizeM;
-        const yPx = maxY - (northing - graphHeader.originNorthing) / graphHeader.pixelSizeM;
+        const xPx = point[0];
+        const yPx = point[1];
 
         if (i === 0) {
           context.moveTo(xPx, yPx);
@@ -1605,7 +1519,7 @@ export function drawBoundaryBasemapAlignedToGraphGrid(
   context.setTransform(1, 0, 0, 1, 0, 0);
 
   return {
-    featureCount: parsedBoundary.features.length,
+    featureCount: projectedBoundary.features.length,
     pathCount: renderedPathCount,
   };
 }
@@ -5397,33 +5311,6 @@ function clampInt(value, minValue, maxValue) {
   return value;
 }
 
-function parseCoordinatePair(value, context) {
-  if (!Array.isArray(value) || value.length < 2) {
-    throw new Error(`${context} must be [x, y]`);
-  }
-
-  const x = asFiniteNumber(value[0], `${context}[0]`);
-  const y = asFiniteNumber(value[1], `${context}[1]`);
-  return [x, y];
-}
-
-function asFiniteNumber(value, context) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new Error(`${context} must be a finite number`);
-  }
-  return value;
-}
-
-function isClosedPath(path) {
-  if (path.length < 3) {
-    return false;
-  }
-
-  const first = path[0];
-  const last = path[path.length - 1];
-  return first[0] === last[0] && first[1] === last[1];
-}
-
 if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined') {
   window.addEventListener('DOMContentLoaded', async () => {
     const locationSearch = globalThis.location?.search ?? '';
@@ -5662,9 +5549,14 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           cycleMinutes = routingSnapshot.colourCycleMinutes;
         }
 
+        const currentTheme = resolveIsochroneTheme();
         return exportCurrentRenderedIsochroneSvg(shell, {
+          graphHeader: initializedMapData?.graph.header ?? null,
+          boundaryPayload: initializedMapData?.boundaryPayload ?? null,
+          viewport: initializedMapData?.viewport ?? null,
           edgeVertexData,
           cycleMinutes,
+          theme: currentTheme,
           title,
           messages: getShellLocaleMessages(shell),
           scaleBarLabel,
