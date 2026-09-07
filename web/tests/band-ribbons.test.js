@@ -4,6 +4,8 @@ import test from 'node:test';
 import {
   collectBandBoundaryCrossings,
   OUTPUT_PIXELS_PER_MM,
+  buildDrawnBandField,
+  collectDrawnContourPoints,
   labelBoxSitsOnLine,
   planRibbonContourLabels,
   ribbonWidthPx,
@@ -73,96 +75,6 @@ test('the zone width is a length on the sheet, not a count of pixels', () => {
   assert.ok(Math.abs(ribbonWidthPx(15, 300 / 25.4) - 177.16) < 0.01);
 });
 
-test('labels outside the frame are dropped', () => {
-  const labels = planRibbonContourLabels(
-    [{ x: -50, y: 10, seconds: 900, wayX: 1, wayY: 0 }],
-    {
-      transform: (x, y) => [x, y],
-      widthPx: 100,
-      heightPx: 100,
-      spacingPx: 50,
-      formatLabel: () => '15 min',
-    },
-  );
-  assert.deepEqual(labels, []);
-});
-
-test('a label follows its contour, not the way that happens to cross it', () => {
-  // A ring road meets a boundary running along it, not out through it. Reading
-  // the angle off that road stood the label at right angles to the line it
-  // belongs to; the boundary's own neighbouring crossings say where it runs.
-  const crossings = [];
-  for (let x = 0; x <= 300; x += 20) {
-    // A contour running due east, crossed by ways pointing every which way.
-    crossings.push({ x, y: 200, seconds: 900, wayX: 1, wayY: (x % 40 === 0) ? 3 : -3 });
-  }
-  const labels = planRibbonContourLabels(crossings, {
-    transform: (x, y) => [x, y],
-    widthPx: 400,
-    heightPx: 400,
-    spacingPx: 120,
-    formatLabel: () => '15 min',
-  });
-
-  assert.ok(labels.length > 0, 'nothing was labelled');
-  for (const label of labels) {
-    assert.ok(
-      Math.abs(label.angleDegrees) < 5,
-      `label set at ${label.angleDegrees.toFixed(1)} degrees, but its contour runs level`,
-    );
-  }
-});
-
-/** A run of crossings along one boundary, close enough to read as one line. */
-function crossingsAlong(from, to, step, seconds = 900) {
-  const points = [];
-  const span = Math.hypot(to[0] - from[0], to[1] - from[1]);
-  for (let travelled = 0; travelled <= span; travelled += step) {
-    const fraction = span === 0 ? 0 : travelled / span;
-    points.push({
-      x: from[0] + (to[0] - from[0]) * fraction,
-      y: from[1] + (to[1] - from[1]) * fraction,
-      seconds,
-      wayX: 1,
-      wayY: 0,
-    });
-  }
-  return points;
-}
-
-test('a value repeats along a contour long enough to carry it twice', () => {
-  // An isobar or an altitude line carries its value more than once, so a
-  // reader never has far to follow it.
-  const labels = planRibbonContourLabels(crossingsAlong([20, 300], [980, 300], 10), {
-    transform: (x, y) => [x, y],
-    widthPx: 1000,
-    heightPx: 600,
-    spacingPx: 200,
-    fontSize: 12,
-    formatLabel: () => '15 min',
-  });
-
-  assert.ok(labels.length >= 3, `only ${labels.length} labels on a 960 pixel line`);
-  const xs = labels.map((label) => label.x).sort((a, b) => a - b);
-  for (let index = 1; index < xs.length; index += 1) {
-    assert.ok(xs[index] - xs[index - 1] >= 200, `labels ${xs[index - 1]} and ${xs[index]} crowd`);
-  }
-});
-
-test('a line too short to sit a value on is left unlabelled', () => {
-  // Dropped rather than placed badly: the reader can follow the line to the
-  // next value, and a value in the wrong place is worse than an absent one.
-  const labels = planRibbonContourLabels(crossingsAlong([100, 100], [110, 100], 5), {
-    transform: (x, y) => [x, y],
-    widthPx: 400,
-    heightPx: 400,
-    spacingPx: 100,
-    fontSize: 12,
-    formatLabel: () => '15 min',
-  });
-  assert.deepEqual(labels, []);
-});
-
 test('a box sits on its line only when the line runs in one end and out the other', () => {
   const straight = [[0, 0], [50, 0], [100, 0], [150, 0], [200, 0]];
   // Centred on the line and level with it: in at the front, out at the back.
@@ -179,4 +91,92 @@ test('a box sits on its line only when the line runs in one end and out the othe
   // the same end, which reads as a value floating in a bend.
   const hairpin = [[0, 0], [100, 0], [100, 4], [0, 4]];
   assert.equal(labelBoxSitsOnLine(hairpin, 60, 2, 0, 30, 8), false);
+});
+
+/** One boundary's worth of contour points, as the planner now takes them. */
+function boundaryLine(from, to, step, seconds = 900) {
+  const points = [];
+  const span = Math.hypot(to[0] - from[0], to[1] - from[1]);
+  for (let travelled = 0; travelled <= span; travelled += step) {
+    const fraction = span === 0 ? 0 : travelled / span;
+    points.push([from[0] + (to[0] - from[0]) * fraction, from[1] + (to[1] - from[1]) * fraction]);
+  }
+  return new Map([[seconds, points]]);
+}
+
+test('a value repeats along a contour long enough to carry it twice', () => {
+  // An isobar or an altitude line carries its value more than once, so a
+  // reader never has far to follow it.
+  const labels = planRibbonContourLabels(boundaryLine([20, 300], [980, 300], 10), {
+    widthPx: 1000,
+    heightPx: 600,
+    spacingPx: 200,
+    fontSize: 12,
+    formatLabel: () => '15 min',
+  });
+
+  assert.ok(labels.length >= 3, `only ${labels.length} labels on a 960 pixel line`);
+  const xs = labels.map((label) => label.x).sort((a, b) => a - b);
+  for (let index = 1; index < xs.length; index += 1) {
+    assert.ok(xs[index] - xs[index - 1] >= 200, `labels ${xs[index - 1]} and ${xs[index]} crowd`);
+  }
+  for (const label of labels) {
+    assert.ok(Math.abs(label.angleDegrees) < 5, `set at ${label.angleDegrees.toFixed(1)} degrees`);
+  }
+});
+
+test('a line too short to sit a value on is left unlabelled', () => {
+  // Dropped rather than placed badly: the reader can follow the line to the
+  // next value, and a value in the wrong place is worse than an absent one.
+  const labels = planRibbonContourLabels(boundaryLine([100, 100], [110, 100], 5), {
+    widthPx: 400,
+    heightPx: 400,
+    spacingPx: 100,
+    fontSize: 12,
+    formatLabel: () => '15 min',
+  });
+  assert.deepEqual(labels, []);
+});
+
+test('labels off the frame are dropped', () => {
+  const labels = planRibbonContourLabels(boundaryLine([-400, 50], [-20, 50], 5), {
+    widthPx: 300,
+    heightPx: 300,
+    spacingPx: 80,
+    fontSize: 12,
+    formatLabel: () => '15 min',
+  });
+  assert.deepEqual(labels, []);
+});
+
+test('the drawn boundary lies a zone half-width beyond the way that crosses it', () => {
+  // A way running east at one second per pixel, so it passes 900 s at x=900.
+  // The map's region of 900 s or less is every point with such a way within
+  // half a zone width, so its edge is half a width further out - which is why
+  // a value placed on the way's own crossing floated inside the band, near a
+  // line but never on it.
+  const halfWidthPx = 30;
+  const segments = [];
+  for (let x = 0; x < 1400; x += 10) {
+    segments.push(x, 300, x, x + 10, 300, x + 10);
+  }
+  const field = buildDrawnBandField(Float64Array.from(segments), {
+    originXPx: 0,
+    originYPx: 0,
+    scale: 1,
+    widthPx: 1400,
+    heightPx: 600,
+    halfWidthPx,
+    bandSeconds: 900,
+    cellPx: 4,
+  });
+  const points = collectDrawnContourPoints(field).get(900);
+
+  assert.ok(points && points.length > 0, 'the boundary was not found at all');
+  const xs = points.map((point) => point[0]).sort((a, b) => a - b);
+  const middle = xs[Math.floor(xs.length / 2)];
+  assert.ok(
+    Math.abs(middle - (900 + halfWidthPx)) <= 3 * field.cellPx,
+    `boundary at x=${middle}, expected about ${900 + halfWidthPx}, not the crossing at 900`,
+  );
 });

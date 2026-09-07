@@ -15,7 +15,8 @@ import { resolveViewportFrame } from '../core/viewport.js';
 import { buildMonochromeIsochroneSvg } from '../export/monochrome-svg.js';
 import {
   buildBandOrderedSegments,
-  collectBandBoundaryCrossings,
+  buildDrawnBandField,
+  collectDrawnContourPoints,
   OUTPUT_PIXELS_PER_MM,
   planRibbonContourLabels,
   RIBBON_WIDTH_MM,
@@ -89,7 +90,6 @@ function getOrBuildBandGeometry(snapshot, segments, bandSeconds) {
   if (cached && cached.segments === segments && cached.bandSeconds === bandSeconds) {
     return cached;
   }
-  const crossings = collectBandBoundaryCrossings(segments, bandSeconds);
   let maxSeconds = bandSeconds;
   for (let offset = 5; offset < segments.length; offset += 6) {
     const seconds = segments[offset];
@@ -101,7 +101,6 @@ function getOrBuildBandGeometry(snapshot, segments, bandSeconds) {
     segments,
     bandSeconds,
     maxSeconds,
-    crossings,
     // Cutting the ways into bands is only for a renderer that draws them band
     // by band. The field renderer takes the smallest time per fragment, so the
     // order they are drawn in does not matter and neither does the cutting -
@@ -354,16 +353,27 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
   // for its label, computed once and carried on the scene so the screen and
   // the sheet draw the same lines in the same places.
   const bandGeometry = hasField ? getOrBuildBandGeometry(snapshot, segments, bandSeconds) : null;
-  const contourCrossings = bandGeometry?.crossings ?? [];
+  // Placed against the field the map draws, not against the ways: see
+  // buildDrawnBandField for why those are not the same line.
   const labels = hasField
-    ? planRibbonContourLabels(contourCrossings, {
-      transform,
-      widthPx,
-      heightPx,
-      spacingPx: options.labelSpacingPx ?? Math.max(ribbonPx * 3, 160),
-      fontSize: labelFontSize,
-      formatLabel: (seconds) => formatBandLabel(seconds / 60, options.formatMinutes),
-    })
+    ? planRibbonContourLabels(
+      collectDrawnContourPoints(buildDrawnBandField(segments, {
+        originXPx: frame.offsetXPx,
+        originYPx: frame.offsetYPx,
+        scale: frame.effectiveScale,
+        widthPx,
+        heightPx,
+        halfWidthPx: ribbonPx / 2,
+        bandSeconds,
+      })),
+      {
+        widthPx,
+        heightPx,
+        spacingPx: options.labelSpacingPx ?? Math.max(ribbonPx * 3, 160),
+        fontSize: labelFontSize,
+        formatLabel: (seconds) => formatBandLabel(seconds / 60, options.formatMinutes),
+      },
+    )
     : [];
   return {
     widthPx,
@@ -396,7 +406,6 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
         outlinePx: 0.9,
       }
       : null,
-    contourCrossings,
     labels,
     waterPattern: WATER_HATCH_PATTERN,
     waterInk: WATER_INK,

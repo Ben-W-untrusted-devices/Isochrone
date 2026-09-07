@@ -87,6 +87,170 @@ export function collectBandBoundaryCrossings(segments, bandSeconds) {
 }
 
 /**
+ * The field the map draws, on a coarse grid of the output.
+ *
+ * A point is in the map's ≤T region when some way within half a zone width of
+ * it has a time of T or less, so the drawn field is the smallest time over the
+ * ways near each point - a minimum taken over a disc of the zone's half width.
+ * That is not the same as the time on the ways themselves: along a way, the
+ * smallest time within half a width is the time from half a width further in,
+ * so the drawn boundary sits outside the way's own crossing of a threshold by
+ * about that distance. Labels placed on the crossings therefore floated inside
+ * the band, near a line but never on it.
+ *
+ * Built the same way the GPU builds it - splat the ways, then take the minimum
+ * over the neighbourhood - so what the labels are placed against is what the
+ * reader sees. Coarse because a label only has to land within its own text
+ * height of the line, and the grid is what makes this cheap enough to do on
+ * the processor for the export as well as the screen.
+ */
+export function buildDrawnBandField(segments, options) {
+  const {
+    originXPx,
+    originYPx,
+    scale,
+    widthPx,
+    heightPx,
+    halfWidthPx,
+    bandSeconds,
+    cellPx = 4,
+  } = options;
+  // The frame as three numbers rather than a function returning a pair: this
+  // runs once per way and a pair per call is a million allocations on Berlin.
+  const toX = (graphX) => (graphX - originXPx) * scale;
+  const toY = (graphY) => (graphY - originYPx) * scale;
+  const columns = Math.max(1, Math.ceil(widthPx / cellPx) + 1);
+  const rows = Math.max(1, Math.ceil(heightPx / cellPx) + 1);
+  const times = new Float64Array(columns * rows).fill(Number.POSITIVE_INFINITY);
+
+  // The ways themselves, sampled into the grid at its own resolution so a long
+  // rural way does not leave gaps between its ends.
+  const margin = halfWidthPx + cellPx;
+  for (let offset = 0; offset + 5 < segments.length; offset += RIBBON_SEGMENT_STRIDE) {
+    const fromX = toX(segments[offset]);
+    const fromY = toY(segments[offset + 1]);
+    const endX = toX(segments[offset + 3]);
+    const endY = toY(segments[offset + 4]);
+    if (
+      (fromX < -margin && endX < -margin) || (fromX > widthPx + margin && endX > widthPx + margin)
+      || (fromY < -margin && endY < -margin) || (fromY > heightPx + margin && endY > heightPx + margin)
+    ) {
+      continue;
+    }
+    const fromSeconds = segments[offset + 2];
+    const toSeconds = segments[offset + 5];
+    const steps = Math.max(1, Math.ceil(Math.hypot(endX - fromX, endY - fromY) / cellPx));
+    for (let step = 0; step <= steps; step += 1) {
+      const fraction = step / steps;
+      const column = Math.round((fromX + (endX - fromX) * fraction) / cellPx);
+      const row = Math.round((fromY + (endY - fromY) * fraction) / cellPx);
+      if (column < 0 || row < 0 || column >= columns || row >= rows) {
+        continue;
+      }
+      const seconds = fromSeconds + (toSeconds - fromSeconds) * fraction;
+      const index = row * columns + column;
+      if (seconds < times[index]) {
+        times[index] = seconds;
+      }
+    }
+  }
+
+  // The minimum over the zone's half width, as two passes of a running window.
+  const reach = Math.max(1, Math.round(halfWidthPx / cellPx));
+  minimiseAlongRows(times, columns, rows, reach);
+  minimiseAlongColumns(times, columns, rows, reach);
+
+  const bands = new Int32Array(columns * rows);
+  for (let index = 0; index < bands.length; index += 1) {
+    const seconds = times[index];
+    bands[index] = Number.isFinite(seconds) ? Math.floor(seconds / bandSeconds) : -1;
+  }
+  return { bands, columns, rows, cellPx, bandSeconds };
+}
+
+function minimiseAlongRows(times, columns, rows, reach) {
+  const line = new Float64Array(columns);
+  for (let row = 0; row < rows; row += 1) {
+    const base = row * columns;
+    line.set(times.subarray(base, base + columns));
+    for (let column = 0; column < columns; column += 1) {
+      let smallest = line[column];
+      const from = Math.max(0, column - reach);
+      const to = Math.min(columns - 1, column + reach);
+      for (let near = from; near <= to; near += 1) {
+        if (line[near] < smallest) {
+          smallest = line[near];
+        }
+      }
+      times[base + column] = smallest;
+    }
+  }
+}
+
+function minimiseAlongColumns(times, columns, rows, reach) {
+  const line = new Float64Array(rows);
+  for (let column = 0; column < columns; column += 1) {
+    for (let row = 0; row < rows; row += 1) {
+      line[row] = times[row * columns + column];
+    }
+    for (let row = 0; row < rows; row += 1) {
+      let smallest = line[row];
+      const from = Math.max(0, row - reach);
+      const to = Math.min(rows - 1, row + reach);
+      for (let near = from; near <= to; near += 1) {
+        if (line[near] < smallest) {
+          smallest = line[near];
+        }
+      }
+      times[row * columns + column] = smallest;
+    }
+  }
+}
+
+/**
+ * Where the drawn field changes band, as points on those boundaries.
+ *
+ * One point per pair of neighbouring cells that fall in different bands, at
+ * the midpoint between them, tagged with the time of the boundary they
+ * straddle. A pair with nothing reached on one side is the limit of travel
+ * rather than a contour, and is left to the heavier line that marks it.
+ */
+export function collectDrawnContourPoints(field) {
+  const { bands, columns, rows, cellPx, bandSeconds } = field;
+  const byBoundary = new Map();
+  const add = (bandA, bandB, x, y) => {
+    const boundary = Math.max(bandA, bandB) * bandSeconds;
+    const points = byBoundary.get(boundary);
+    if (points === undefined) {
+      byBoundary.set(boundary, [[x, y]]);
+    } else {
+      points.push([x, y]);
+    }
+  };
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const here = bands[row * columns + column];
+      if (here < 0) {
+        continue;
+      }
+      if (column + 1 < columns) {
+        const right = bands[row * columns + column + 1];
+        if (right >= 0 && right !== here) {
+          add(here, right, (column + 0.5) * cellPx, row * cellPx);
+        }
+      }
+      if (row + 1 < rows) {
+        const below = bands[(row + 1) * columns + column];
+        if (below >= 0 && below !== here) {
+          add(here, below, column * cellPx, (row + 0.5) * cellPx);
+        }
+      }
+    }
+  }
+  return byBoundary;
+}
+
+/**
  * How wide a character is, as a fraction of the font size.
  *
  * A rough average for the digits and short words a value is made of, which is
@@ -245,9 +409,8 @@ export function labelBoxSitsOnLine(chain, centreX, centreY, angleDegrees, halfWi
  * against what has already been placed rather than a bucket per cell, so which
  * label survives does not depend on where a grid happens to fall.
  */
-export function planRibbonContourLabels(crossings, options) {
+export function planRibbonContourLabels(pointsByBoundary, options) {
   const {
-    transform,
     widthPx,
     heightPx,
     spacingPx = 220,
@@ -256,19 +419,6 @@ export function planRibbonContourLabels(crossings, options) {
     marginPx = 0,
     chainJoinPx = DEFAULT_CHAIN_JOIN_PX,
   } = options;
-
-  // One line per boundary, in output space, built from that boundary's own
-  // crossings.
-  const pointsByBoundary = new Map();
-  for (const crossing of crossings) {
-    const [x, y] = transform(crossing.x, crossing.y);
-    const points = pointsByBoundary.get(crossing.seconds);
-    if (points === undefined) {
-      pointsByBoundary.set(crossing.seconds, [[x, y]]);
-    } else {
-      points.push([x, y]);
-    }
-  }
 
   const kept = [];
   const placed = [];
