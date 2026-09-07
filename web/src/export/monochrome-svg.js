@@ -175,28 +175,27 @@ export function buildMonochromeIsochroneSvg(scene) {
       );
     }
   }  // Clipped to the land. A zone is a claim about ground someone can stand on,
-  // and the sea is not that - but a river or a lake is different, having ways
-  // along both banks whose zones legitimately meet over the water, so only the
-  // coastline clips anything. Even-odd against a rectangle of the whole sheet
-  // makes the clip the land: everything but the sea, islands included.
-  const coastline = basemap.coastlineFeatures ?? [];
-  const coastlineRings = coastline
+  // and water is not that - the sea and the lakes alike. Even-odd against a
+  // rectangle of the whole sheet makes the clip the land: everything but the
+  // water, islands included.
+  const clipTo = basemap.clipFeatures ?? [];
+  const clipRings = clipTo
     .flatMap((feature) => feature.paths)
     .map((path) => ringToPathData(Float64Array.from(path.flat()), transform))
     .filter((data) => data.length > 0)
     .join('');
   const landClipId = 'mono-land';
-  if (coastlineRings.length > 0) {
+  if (clipRings.length > 0) {
     parts.push(
       `<clipPath id="${landClipId}" clipPathUnits="userSpaceOnUse">`
       + `<path clip-rule="evenodd" d="M0 0H${formatSvgNumber(widthPx)}`
-      + `V${formatSvgNumber(heightPx)}H0Z${coastlineRings}" /></clipPath>`,
+      + `V${formatSvgNumber(heightPx)}H0Z${clipRings}" /></clipPath>`,
     );
   }
 
   const labels = [];
   if (ribbons && ribbons.ordered.data.length >= 6) {
-    if (coastlineRings.length > 0) {
+    if (clipRings.length > 0) {
       parts.push(`<g clip-path="url(#${landClipId})">`);
     }
     const { ordered, patterns, widthPx: ribbonPx, outlinePx } = ribbons;
@@ -256,7 +255,7 @@ export function buildMonochromeIsochroneSvg(scene) {
       }
     }
     parts.push(`<defs>${defs.join('')}</defs>`, ...limitStrokes, ...strokes);
-    if (coastlineRings.length > 0) {
+    if (clipRings.length > 0) {
       parts.push('</g>');
     }
   }
@@ -274,6 +273,19 @@ export function buildMonochromeIsochroneSvg(scene) {
       parts.push(
         `<path d="${coastData}" fill="none" stroke="${ink}"`
         + ` stroke-width="${contourWidth}" />`,
+      );
+    }
+  }
+  if (basemap.districtFeatures?.length) {
+    const districtData = basemap.districtFeatures
+      .flatMap((feature) => feature.paths)
+      .map((path) => ringToPathData(Float64Array.from(path.flat()), transform))
+      .filter((data) => data.length > 0)
+      .join('');
+    if (districtData.length > 0) {
+      parts.push(
+        `<path d="${districtData}" fill="none" stroke="${ink}"`
+        + ` stroke-width="${formatSvgNumber(scene.districtStrokeWidth ?? 0.6)}" />`,
       );
     }
   }

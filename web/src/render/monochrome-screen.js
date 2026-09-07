@@ -334,13 +334,14 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
   const asPaths = (features) => features.map((feature) => ({
     paths: feature.paths.map((path) => path.map(([graphX, graphY]) => [graphX, graphY])),
   }));
-  // The coastline and the inland water are ruled the same way, but only the
-  // coastline is a limit on where anyone can be: a river or a lake has ways
-  // running along both banks and a zone drawn around them legitimately covers
-  // the water between, while the sea has no far bank on this sheet.
-  const coastlineFeatures = asPaths(options.projectedBoundary?.waterFeatures ?? []);
-  const waterFeatures = coastlineFeatures
+  // Water is a limit on where anyone can be, so a zone stops at it: the sea
+  // and the lakes alike.
+  const waterFeatures = asPaths(options.projectedBoundary?.waterFeatures ?? [])
     .concat(asPaths(options.projectedBoundary?.inlandWaterFeatures ?? []));
+  // The district edges, which say which city this is. They are the reason the
+  // colour map is legible as a place rather than a shape, and monochrome was
+  // drawing everything but them.
+  const districtFeatures = asPaths(options.projectedBoundary?.features ?? []);
 
   const labelFontSize = options.labelFontSize ?? 12;
   const pixelsPerMm = options.outputPixelsPerMm ?? OUTPUT_PIXELS_PER_MM;
@@ -406,9 +407,13 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
     roadStrokeWidth: 0.3,
     patternScale: options.patternScale ?? 1,
     legend: false,
+    districtStrokeWidth: 0.6,
     basemap: {
       waterFeatures,
-      coastlineFeatures,
+      districtFeatures,
+      // What a zone is clipped to. All of it: the sheet does not say where
+      // anyone can stand on water.
+      clipFeatures: waterFeatures,
       roadSegments: collectVisibleRoadSegments(
         mapData,
         graph,

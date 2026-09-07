@@ -143,15 +143,13 @@ export function drawMonochromeScene(context, scene, options = {}) {
     };
 
     // Clipped to the land. A zone is a claim about ground someone can stand
-    // on, and the sea is not that - but a river or a lake is different, having
-    // ways along both banks whose zones legitimately meet over the water, so
-    // only the coastline clips anything.
-    const coastline = basemap.coastlineFeatures ?? [];
+    // on, and water is not that - the sea and the lakes alike.
+    const clipTo = basemap.clipFeatures ?? [];
     context.save();
-    if (coastline.length > 0) {
+    if (clipTo.length > 0) {
       context.beginPath();
       context.rect(0, 0, widthPx, heightPx);
-      for (const feature of coastline) {
+      for (const feature of clipTo) {
         for (const path of feature.paths) {
           tracePolygon(context, Float64Array.from(path.flat()), transform);
         }
@@ -202,6 +200,23 @@ export function drawMonochromeScene(context, scene, options = {}) {
     if (tracedOutline) {
       context.strokeStyle = ink;
       context.lineWidth = scene.contourStrokeWidth;
+      context.stroke();
+    }
+  }
+
+  // The district edges, over the zones with the rest of the linework.
+  if (basemap.districtFeatures?.length) {
+    context.beginPath();
+    let tracedDistricts = false;
+    for (const feature of basemap.districtFeatures) {
+      for (const path of feature.paths) {
+        tracedDistricts = tracePolygon(context, Float64Array.from(path.flat()), transform)
+          || tracedDistricts;
+      }
+    }
+    if (tracedDistricts) {
+      context.strokeStyle = ink;
+      context.lineWidth = scene.districtStrokeWidth ?? 0.6;
       context.stroke();
     }
   }

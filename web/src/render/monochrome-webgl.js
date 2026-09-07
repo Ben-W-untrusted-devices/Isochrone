@@ -291,39 +291,48 @@ uniform vec4 u_paper;
 ${dialect.declareColour}
 ${COMPOSITE_FRAGMENT_PROLOGUE}
 
-// At or past the far end is ground no way came near.
-bool isEmpty(vec2 uv) {
-  return unpackUnitFloat(${dialect.sample}(u_field, uv)) > 0.9999;
+// The band at a point, or -1 where no way came near it.
+float bandAt(vec2 uv) {
+  float unit = unpackUnitFloat(${dialect.sample}(u_field, uv));
+  return unit > 0.9999 ? -1.0 : floor(unit * u_maxSeconds / u_bandSeconds);
 }
 
 void main(void) {
   vec2 uv = gl_FragCoord.xy / u_viewportPx;
-  if (isEmpty(uv)) {
+  float band = bandAt(uv);
+  if (band < 0.0) {
     discard;
   }
   vec2 screen = vec2(gl_FragCoord.x, u_viewportPx.y - gl_FragCoord.y);
-  float seconds = unpackUnitFloat(${dialect.sample}(u_field, uv)) * u_maxSeconds;
 
   // The limit of travel: covered ground with uncovered ground beside it.
-  vec2 step = u_limitPx / u_viewportPx;
+  vec2 edge = u_limitPx / u_viewportPx;
   if (
-    isEmpty(uv + vec2(step.x, 0.0)) || isEmpty(uv - vec2(step.x, 0.0))
-    || isEmpty(uv + vec2(0.0, step.y)) || isEmpty(uv - vec2(0.0, step.y))
+    bandAt(uv + vec2(edge.x, 0.0)) < 0.0 || bandAt(uv - vec2(edge.x, 0.0)) < 0.0
+    || bandAt(uv + vec2(0.0, edge.y)) < 0.0 || bandAt(uv - vec2(0.0, edge.y)) < 0.0
   ) {
     ${dialect.colour} = u_ink;
     return;
   }
 
-  // A contour where the field crosses a boundary, a fixed width on the sheet
-  // however steeply the time is changing there.
-  float perPx = max(fwidth(seconds), 1e-6);
-  float nearest = floor(seconds / u_bandSeconds + 0.5) * u_bandSeconds;
-  if (nearest > 0.0 && abs(seconds - nearest) / perPx < u_contourHalfPx) {
+  // A contour wherever the band changes between one point and the next.
+  //
+  // Not a distance from the boundary divided by the rate the time is changing:
+  // this field steps rather than slopes - it jumps where a different way
+  // becomes the nearest in time - and across a step that rate is meaningless
+  // and made the line as wide as the step was large.
+  vec2 reach = u_contourHalfPx / u_viewportPx;
+  float left = bandAt(uv - vec2(reach.x, 0.0));
+  float right = bandAt(uv + vec2(reach.x, 0.0));
+  float below = bandAt(uv - vec2(0.0, reach.y));
+  float above = bandAt(uv + vec2(0.0, reach.y));
+  if (
+    (left >= 0.0 && left != band) || (right >= 0.0 && right != band)
+    || (below >= 0.0 && below != band) || (above >= 0.0 && above != band)
+  ) {
     ${dialect.colour} = u_ink;
     return;
   }
-
-  float band = floor(seconds / u_bandSeconds);
   if (mod(band, u_patternCount) < 0.5) {
     ${dialect.colour} = u_paper;
     return;
@@ -1061,12 +1070,10 @@ export function drawMonochromeSceneWebGl(state, scene) {
   }
 
   // Clipped to the land. A zone is a claim about ground someone can stand on,
-  // and the sea is not that - but a river or a lake is different, having ways
-  // along both banks whose zones legitimately meet over the water, so only the
-  // coastline masks anything.
-  const coastline = scene.basemap.coastlineFeatures ?? [];
-  const clipped = coastline.length > 0
-    && maskRingsIntoStencil(state, scene, viewport, coastline);
+  // and water is not that - the sea and the lakes alike.
+  const clipTo = scene.basemap.clipFeatures ?? [];
+  const clipped = clipTo.length > 0
+    && maskRingsIntoStencil(state, scene, viewport, clipTo);
   if (clipped) {
     gl.stencilFunc(gl.NOTEQUAL, 1, 1);
   }
@@ -1088,6 +1095,24 @@ export function drawMonochromeSceneWebGl(state, scene) {
       }
     }
     drawTriangles(state, Float32Array.from(outline), ink, viewport);
+  }
+
+  // The district edges, over the zones with the rest of the linework. They are
+  // what says which city this is.
+  if (basemap.districtFeatures?.length) {
+    const districts = [];
+    for (const feature of basemap.districtFeatures) {
+      for (const path of feature.paths) {
+        appendThickPolyline(
+          districts,
+          Float64Array.from(path.flat()),
+          transform,
+          Math.max(1, scene.districtStrokeWidth ?? 0.6),
+          true,
+        );
+      }
+    }
+    drawTriangles(state, Float32Array.from(districts), ink, viewport);
   }
 
   const roads = basemap.roadSegments;
