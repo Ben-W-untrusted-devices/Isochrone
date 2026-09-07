@@ -205,7 +205,9 @@ export function createWebGlIsochroneRenderer(canvas, options = {}) {
   const contextAttributes = {
     alpha: true,
     antialias: true,
-    depth: false,
+    // The monochrome field takes the smallest travel time over the ways
+    // covering each fragment, which is a depth test on the time itself.
+    depth: true,
     // The monochrome water fill masks a polygon with holes through the
     // stencil buffer, which is exact for any ring set and needs no
     // tessellation.

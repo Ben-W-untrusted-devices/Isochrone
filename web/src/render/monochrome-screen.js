@@ -89,11 +89,29 @@ function getOrBuildBandGeometry(snapshot, segments, bandSeconds) {
   if (cached && cached.segments === segments && cached.bandSeconds === bandSeconds) {
     return cached;
   }
+  const crossings = collectBandBoundaryCrossings(segments, bandSeconds);
+  let maxSeconds = bandSeconds;
+  for (let offset = 5; offset < segments.length; offset += 6) {
+    const seconds = segments[offset];
+    if (Number.isFinite(seconds) && seconds > maxSeconds) {
+      maxSeconds = seconds;
+    }
+  }
   const geometry = {
     segments,
     bandSeconds,
-    ordered: buildBandOrderedSegments(segments, bandSeconds),
-    crossings: collectBandBoundaryCrossings(segments, bandSeconds),
+    maxSeconds,
+    crossings,
+    // Cutting the ways into bands is only for a renderer that draws them band
+    // by band. The field renderer takes the smallest time per fragment, so the
+    // order they are drawn in does not matter and neither does the cutting -
+    // and it is 220 ms on Berlin, which is not worth spending to find out
+    // whether anything wants it.
+    get ordered() {
+      const cut = buildBandOrderedSegments(segments, bandSeconds);
+      Object.defineProperty(this, 'ordered', { value: cut });
+      return cut;
+    },
   };
   snapshot[BAND_GEOMETRY_PROPERTY] = geometry;
   return geometry;
@@ -357,7 +375,13 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
     ribbons: hasField
       ? {
         segments,
-        ordered: bandGeometry.ordered,
+        // The far end of the field, which is what the packed time is measured
+        // against. Taken from the ways rather than the whole distance array,
+        // so it covers exactly what is drawn.
+        maxSeconds: bandGeometry.maxSeconds,
+        get ordered() {
+          return bandGeometry.ordered;
+        },
         bandSeconds,
         patterns,
         // One legend row per pattern, labelled with the time it first stands

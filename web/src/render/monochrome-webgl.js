@@ -139,6 +139,202 @@ void main(void) {
   gl_FragColor = u_ink;
 }`;
 
+// The travel-time field, as an image.
+//
+// Painting bands farthest-first faked a minimum: whichever band was drawn last
+// won the ground two of them both covered. It gets the answer right in open
+// country and wrong in a town, where the drawn edge of a band is its ways
+// dilated by half the zone width rather than the line where the time actually
+// crosses the boundary - so every edge bulged outward in arcs of that one
+// radius, all curving the same way.
+//
+// So the minimum is taken properly, by depth test on the time itself: each way
+// writes its interpolated time as depth, and the nearest in time survives. The
+// result is a field, which is what a contour needs - the line can then be put
+// where the field crosses a boundary and given a width in pixels, instead of
+// being inferred from the outline of whatever was drawn last.
+//
+// The time is packed across the four bytes of a colour, because a colour
+// buffer that holds floats is not available everywhere and 32 bits of fixed
+// point over the range of a field is far more than enough.
+const FIELD_FRAGMENT_PROLOGUE = `
+vec4 packUnitFloat(float value) {
+  vec4 bits = fract(value * vec4(1.0, 255.0, 65025.0, 16581375.0));
+  return bits - bits.xxyz * vec4(1.0 / 255.0, 1.0 / 255.0, 1.0 / 255.0, 0.0);
+}`;
+
+const COMPOSITE_FRAGMENT_PROLOGUE = `
+float unpackUnitFloat(vec4 packed) {
+  return dot(packed, vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0));
+}`;
+
+/**
+ * Builds the field programs in whichever dialect this context speaks.
+ *
+ * Writing a depth per fragment is spelled two different ways: gl_FragDepth in
+ * the shading language WebGL 2 uses, and gl_FragDepthEXT behind an extension
+ * in the one WebGL 1 uses. A WebGL 2 context does not offer the extension and
+ * a WebGL 1 context does not know the keyword, so the whole program has to be
+ * written in one dialect or the other rather than patched between them.
+ *
+ * Returns null where a context can do neither, and the caller keeps the older
+ * ordering.
+ */
+function fieldShaderSources(gl) {
+  const isWebGl2 = typeof gl.drawArraysInstanced === 'function';
+  if (!isWebGl2) {
+    const fragDepth = gl.getExtension?.('EXT_frag_depth') ?? null;
+    const derivatives = gl.getExtension?.('OES_standard_derivatives') ?? null;
+    if (fragDepth === null || derivatives === null) {
+      return null;
+    }
+  }
+
+  const dialect = isWebGl2
+    ? {
+      header: '#version 300 es\n',
+      attribute: 'in',
+      vertexOut: 'out',
+      fragmentIn: 'in',
+      declareColour: 'out vec4 outColour;',
+      colour: 'outColour',
+      sample: 'texture',
+      fragDepth: 'gl_FragDepth',
+    }
+    : {
+      header: '#extension GL_EXT_frag_depth : enable\n'
+        + '#extension GL_OES_standard_derivatives : enable\n',
+      attribute: 'attribute',
+      vertexOut: 'varying',
+      fragmentIn: 'varying',
+      declareColour: '',
+      colour: 'gl_FragColor',
+      sample: 'texture2D',
+      fragDepth: 'gl_FragDepthEXT',
+    };
+
+  const fieldVertex = `${isWebGl2 ? dialect.header : ''}
+${dialect.attribute} vec2 a_corner;
+${dialect.attribute} vec2 a_from;
+${dialect.attribute} float a_fromSeconds;
+${dialect.attribute} vec2 a_to;
+${dialect.attribute} float a_toSeconds;
+uniform highp vec2 u_viewportPx;
+uniform highp vec2 u_originPx;
+uniform highp float u_scale;
+uniform highp float u_halfWidthPx;
+${dialect.vertexOut} highp vec2 v_from;
+${dialect.vertexOut} highp vec2 v_to;
+${dialect.vertexOut} highp vec2 v_seconds;
+void main(void) {
+  vec2 from = (a_from - u_originPx) * u_scale;
+  vec2 to = (a_to - u_originPx) * u_scale;
+  v_from = from;
+  v_to = to;
+  v_seconds = vec2(a_fromSeconds, a_toSeconds);
+  vec2 along = to - from;
+  float span = length(along);
+  vec2 direction = span > 0.0 ? along / span : vec2(1.0, 0.0);
+  vec2 across = vec2(-direction.y, direction.x);
+  vec2 base = a_corner.x < 0.0 ? from : to;
+  vec2 screen = base
+    + direction * (a_corner.x * u_halfWidthPx)
+    + across * (a_corner.y * u_halfWidthPx);
+  vec2 clip = (screen / u_viewportPx) * 2.0 - 1.0;
+  gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+}`;
+
+  const fieldFragment = `${dialect.header}precision highp float;
+uniform highp vec2 u_viewportPx;
+uniform highp float u_halfWidthPx;
+uniform highp float u_maxSeconds;
+${dialect.fragmentIn} highp vec2 v_from;
+${dialect.fragmentIn} highp vec2 v_to;
+${dialect.fragmentIn} highp vec2 v_seconds;
+${dialect.declareColour}
+${FIELD_FRAGMENT_PROLOGUE}
+void main(void) {
+  vec2 screen = vec2(gl_FragCoord.x, u_viewportPx.y - gl_FragCoord.y);
+  vec2 along = v_to - v_from;
+  float lengthSquared = dot(along, along);
+  float travelled = lengthSquared > 0.0
+    ? clamp(dot(screen - v_from, along) / lengthSquared, 0.0, 1.0)
+    : 0.0;
+  if (distance(screen, v_from + along * travelled) > u_halfWidthPx) {
+    discard;
+  }
+  float unit = clamp(mix(v_seconds.x, v_seconds.y, travelled) / u_maxSeconds, 0.0, 1.0);
+  ${dialect.fragDepth} = unit;
+  ${dialect.colour} = packUnitFloat(unit);
+}`;
+
+  const compositeVertex = `${isWebGl2 ? dialect.header : ''}
+${dialect.attribute} vec2 a_position;
+uniform highp vec2 u_viewportPx;
+void main(void) {
+  vec2 clip = (a_position / u_viewportPx) * 2.0 - 1.0;
+  gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+}`;
+
+  const compositeFragment = `${dialect.header}precision highp float;
+uniform sampler2D u_field;
+uniform sampler2D u_tile;
+uniform highp vec2 u_viewportPx;
+uniform highp vec2 u_tileSizePx;
+uniform highp float u_maxSeconds;
+uniform highp float u_bandSeconds;
+uniform highp float u_patternCount;
+uniform highp float u_contourHalfPx;
+uniform highp float u_limitPx;
+uniform vec4 u_ink;
+uniform vec4 u_paper;
+${dialect.declareColour}
+${COMPOSITE_FRAGMENT_PROLOGUE}
+
+// At or past the far end is ground no way came near.
+bool isEmpty(vec2 uv) {
+  return unpackUnitFloat(${dialect.sample}(u_field, uv)) > 0.9999;
+}
+
+void main(void) {
+  vec2 uv = gl_FragCoord.xy / u_viewportPx;
+  if (isEmpty(uv)) {
+    discard;
+  }
+  vec2 screen = vec2(gl_FragCoord.x, u_viewportPx.y - gl_FragCoord.y);
+  float seconds = unpackUnitFloat(${dialect.sample}(u_field, uv)) * u_maxSeconds;
+
+  // The limit of travel: covered ground with uncovered ground beside it.
+  vec2 step = u_limitPx / u_viewportPx;
+  if (
+    isEmpty(uv + vec2(step.x, 0.0)) || isEmpty(uv - vec2(step.x, 0.0))
+    || isEmpty(uv + vec2(0.0, step.y)) || isEmpty(uv - vec2(0.0, step.y))
+  ) {
+    ${dialect.colour} = u_ink;
+    return;
+  }
+
+  // A contour where the field crosses a boundary, a fixed width on the sheet
+  // however steeply the time is changing there.
+  float perPx = max(fwidth(seconds), 1e-6);
+  float nearest = floor(seconds / u_bandSeconds + 0.5) * u_bandSeconds;
+  if (nearest > 0.0 && abs(seconds - nearest) / perPx < u_contourHalfPx) {
+    ${dialect.colour} = u_ink;
+    return;
+  }
+
+  float band = floor(seconds / u_bandSeconds);
+  if (mod(band, u_patternCount) < 0.5) {
+    ${dialect.colour} = u_paper;
+    return;
+  }
+  vec4 texel = ${dialect.sample}(u_tile, fract(screen / u_tileSizePx));
+  ${dialect.colour} = texel.a < 0.5 ? u_paper : u_ink;
+}`;
+
+  return { fieldVertex, fieldFragment, compositeVertex, compositeFragment };
+}
+
 const LINE_VERTEX_SOURCE = FILL_VERTEX_SOURCE;
 const LINE_FRAGMENT_SOURCE = `
 precision mediump float;
@@ -395,6 +591,26 @@ export function createMonochromeWebGlPainter(gl, options = {}) {
     ? null
     : createWebGlProgram(gl, RIBBON_VERTEX_SOURCE, RIBBON_FRAGMENT_SOURCE);
 
+  // The field path needs a per-fragment depth and screen-space derivatives.
+  // Without either, the older ordering is what draws.
+  const fieldSources = instancing === null ? null : fieldShaderSources(gl);
+  // A context that cannot build these still has the older ordering, so a
+  // failure here is a fallback rather than a broken renderer.
+  let fieldProgram = null;
+  let compositeProgram = null;
+  if (fieldSources !== null) {
+    try {
+      fieldProgram = createWebGlProgram(gl, fieldSources.fieldVertex, fieldSources.fieldFragment);
+      compositeProgram = createWebGlProgram(
+        gl, fieldSources.compositeVertex, fieldSources.compositeFragment,
+      );
+    } catch (error) {
+      console.warn('monochrome field programs unavailable; drawing bands in order', error);
+      fieldProgram = null;
+      compositeProgram = null;
+    }
+  }
+
   const state = {
     gl,
     createCanvas,
@@ -405,6 +621,35 @@ export function createMonochromeWebGlPainter(gl, options = {}) {
     ribbonBuffer: gl.createBuffer(),
     ribbonCornerBuffer: gl.createBuffer(),
     ribbonSegments: null,
+    field: fieldProgram === null ? null : {
+      program: fieldProgram,
+      corner: gl.getAttribLocation(fieldProgram, 'a_corner'),
+      from: gl.getAttribLocation(fieldProgram, 'a_from'),
+      fromSeconds: gl.getAttribLocation(fieldProgram, 'a_fromSeconds'),
+      to: gl.getAttribLocation(fieldProgram, 'a_to'),
+      toSeconds: gl.getAttribLocation(fieldProgram, 'a_toSeconds'),
+      viewport: gl.getUniformLocation(fieldProgram, 'u_viewportPx'),
+      origin: gl.getUniformLocation(fieldProgram, 'u_originPx'),
+      scale: gl.getUniformLocation(fieldProgram, 'u_scale'),
+      halfWidth: gl.getUniformLocation(fieldProgram, 'u_halfWidthPx'),
+      maxSeconds: gl.getUniformLocation(fieldProgram, 'u_maxSeconds'),
+    },
+    composite: compositeProgram === null ? null : {
+      program: compositeProgram,
+      position: gl.getAttribLocation(compositeProgram, 'a_position'),
+      viewport: gl.getUniformLocation(compositeProgram, 'u_viewportPx'),
+      fieldTexture: gl.getUniformLocation(compositeProgram, 'u_field'),
+      tile: gl.getUniformLocation(compositeProgram, 'u_tile'),
+      tileSize: gl.getUniformLocation(compositeProgram, 'u_tileSizePx'),
+      maxSeconds: gl.getUniformLocation(compositeProgram, 'u_maxSeconds'),
+      bandSeconds: gl.getUniformLocation(compositeProgram, 'u_bandSeconds'),
+      patternCount: gl.getUniformLocation(compositeProgram, 'u_patternCount'),
+      contourHalf: gl.getUniformLocation(compositeProgram, 'u_contourHalfPx'),
+      limit: gl.getUniformLocation(compositeProgram, 'u_limitPx'),
+      ink: gl.getUniformLocation(compositeProgram, 'u_ink'),
+      paper: gl.getUniformLocation(compositeProgram, 'u_paper'),
+    },
+    fieldTarget: null,
     ribbon: ribbonProgram === null ? null : {
       program: ribbonProgram,
       corner: gl.getAttribLocation(ribbonProgram, 'a_corner'),
@@ -491,8 +736,9 @@ const RIBBON_CORNERS = Float32Array.of(
  * at each. Nothing is repacked, so the two modes cannot drift into describing
  * different journeys.
  */
-function bindRibbonSegments(state, segments, firstInstance) {
-  const { gl, ribbon, instancing } = state;
+function bindRibbonSegments(state, segments, firstInstance, program) {
+  const { gl, instancing } = state;
+  const ribbon = program ?? state.ribbon;
   if (state.ribbonSegments !== segments) {
     gl.bindBuffer(gl.ARRAY_BUFFER, state.ribbonBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, segments, gl.STATIC_DRAW);
@@ -558,10 +804,148 @@ function drawRibbonPass(state, scene, viewport, pass) {
  * union survives; the paper that covers its inside; and one pass for each
  * inked pattern, which draws only the bands that pattern belongs to.
  */
+/**
+ * An offscreen surface the size of the view, holding the field.
+ *
+ * A colour attachment for the packed time and a depth attachment to take the
+ * minimum with. Kept between frames and rebuilt only when the view changes
+ * size.
+ */
+function getOrCreateFieldTarget(state, widthPx, heightPx) {
+  const { gl } = state;
+  const existing = state.fieldTarget;
+  if (existing && existing.widthPx === widthPx && existing.heightPx === heightPx) {
+    return existing;
+  }
+  if (existing) {
+    gl.deleteFramebuffer(existing.framebuffer);
+    gl.deleteTexture(existing.texture);
+    gl.deleteRenderbuffer(existing.depth);
+  }
+
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, widthPx, heightPx, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  // Nearest, because the packed bytes of a time are not a colour and must not
+  // be averaged with a neighbour's.
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+  const depth = gl.createRenderbuffer();
+  gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
+  gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, widthPx, heightPx);
+
+  const framebuffer = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+  gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+  const complete = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  if (!complete) {
+    gl.deleteFramebuffer(framebuffer);
+    gl.deleteTexture(texture);
+    gl.deleteRenderbuffer(depth);
+    state.fieldTarget = null;
+    return null;
+  }
+
+  state.fieldTarget = { framebuffer, texture, depth, widthPx, heightPx };
+  return state.fieldTarget;
+}
+
+/**
+ * The isochrone, from the field rather than from an order of painting.
+ *
+ * One pass puts every way into the offscreen surface, each fragment keeping
+ * the smallest travel time of the ways covering it - which is the time you can
+ * first be there, and is what the map is claiming. A second pass reads that
+ * back and decides everything from it: which band a point is in, where a
+ * contour runs and how wide, and where the limit of travel is.
+ */
+function drawRibbonsFromField(state, scene, viewport, ink, paper) {
+  const { gl, field, composite } = state;
+  const target = getOrCreateFieldTarget(state, viewport[0], viewport[1]);
+  if (target === null) {
+    return null;
+  }
+  // The ways as routing left them, uncut: a fragment's band comes from its own
+  // interpolated time, so nothing here depends on where a boundary falls.
+  const { segments, patterns, widthPx, outlinePx } = scene.ribbons;
+  const total = Math.floor(segments.length / 6);
+  const maxSeconds = Math.max(scene.ribbons.maxSeconds ?? 0, scene.ribbons.bandSeconds) * 1.05;
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
+  gl.viewport(0, 0, viewport[0], viewport[1]);
+  gl.disable(gl.BLEND);
+  gl.enable(gl.DEPTH_TEST);
+  gl.depthFunc(gl.LESS);
+  gl.depthMask(true);
+  // White is the far end of the range, so ground no way reaches reads as
+  // empty rather than as the origin.
+  gl.clearColor(1, 1, 1, 1);
+  gl.clearDepth(1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  gl.useProgram(field.program);
+  bindRibbonSegments(state, segments, 0, field);
+  gl.uniform2f(field.viewport, viewport[0], viewport[1]);
+  gl.uniform2f(field.origin, scene.frame.offsetXPx, scene.frame.offsetYPx);
+  gl.uniform1f(field.scale, scene.frame.effectiveScale);
+  gl.uniform1f(field.halfWidth, widthPx / 2);
+  gl.uniform1f(field.maxSeconds, maxSeconds);
+  state.instancing.draw(gl.TRIANGLES, 0, 6, total);
+  releaseRibbonAttributes(state, field);
+
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, viewport[0], viewport[1]);
+  gl.disable(gl.DEPTH_TEST);
+  gl.depthMask(false);
+  gl.enable(gl.BLEND);
+
+  const hatched = patterns.find((pattern) => pattern.lines.length > 0) ?? patterns[0];
+  const tile = getOrCreateTileTexture(state, hatched, scene.patternScale, scene.ink);
+  gl.useProgram(composite.program);
+  gl.bindBuffer(gl.ARRAY_BUFFER, state.buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, Float32Array.of(
+    0, 0, viewport[0], 0, viewport[0], viewport[1],
+    0, 0, viewport[0], viewport[1], 0, viewport[1],
+  ), gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(composite.position);
+  gl.vertexAttribPointer(composite.position, 2, gl.FLOAT, false, 0, 0);
+  gl.uniform2f(composite.viewport, viewport[0], viewport[1]);
+  gl.uniform1f(composite.maxSeconds, maxSeconds);
+  gl.uniform1f(composite.bandSeconds, scene.ribbons.bandSeconds);
+  gl.uniform1f(composite.patternCount, patterns.length);
+  gl.uniform1f(composite.contourHalf, scene.contourStrokeWidth / 2);
+  gl.uniform1f(composite.limit, Math.max(1, outlinePx * 2));
+  gl.uniform4fv(composite.ink, ink);
+  gl.uniform4fv(composite.paper, paper);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, target.texture);
+  gl.uniform1i(composite.fieldTexture, 0);
+  gl.activeTexture(gl.TEXTURE1);
+  gl.bindTexture(gl.TEXTURE_2D, tile ? tile.texture : null);
+  gl.uniform1i(composite.tile, 1);
+  gl.uniform2f(composite.tileSize, tile ? tile.sizePx : 1, tile ? tile.sizePx : 1);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  gl.activeTexture(gl.TEXTURE0);
+  return total;
+}
+
 function drawRibbons(state, scene, viewport, ink, paper) {
   const { gl, ribbon } = state;
-  if (!ribbon || !scene.ribbons || scene.ribbons.ordered.data.length < 6) {
+  // Tested on the ways themselves, not on the cut form, so asking whether
+  // there is anything to draw does not do the cutting.
+  if (!ribbon || !scene.ribbons || scene.ribbons.segments.length < 6) {
     return 0;
+  }
+  if (state.field && state.composite) {
+    const drawn = drawRibbonsFromField(state, scene, viewport, ink, paper);
+    if (drawn !== null) {
+      return drawn;
+    }
   }
   const { ordered, patterns, widthPx, outlinePx } = scene.ribbons;
   const half = widthPx / 2;
@@ -619,8 +1003,9 @@ function drawRibbons(state, scene, viewport, ink, paper) {
  * leaving the single-attribute line program working, and so looked like the
  * labels had stopped being produced rather than stopped being drawn.
  */
-function releaseRibbonAttributes(state) {
-  const { gl, ribbon, instancing } = state;
+function releaseRibbonAttributes(state, program) {
+  const { gl, instancing } = state;
+  const ribbon = program ?? state.ribbon;
   for (const location of [ribbon.from, ribbon.fromSeconds, ribbon.to, ribbon.toSeconds]) {
     if (location >= 0) {
       instancing.divisor(location, 0);
@@ -661,7 +1046,9 @@ export function drawMonochromeSceneWebGl(state, scene) {
   const transform = scene.transform;
 
   gl.viewport(0, 0, scene.widthPx, scene.heightPx);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.disable(gl.DEPTH_TEST);
+  gl.depthMask(false);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   gl.clearColor(paper[0], paper[1], paper[2], 1);
