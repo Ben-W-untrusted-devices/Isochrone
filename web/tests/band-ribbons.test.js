@@ -149,12 +149,12 @@ test('labels off the frame are dropped', () => {
   assert.deepEqual(labels, []);
 });
 
-test('the drawn boundary lies a zone half-width beyond the way that crosses it', () => {
+test('a band changes where its own way crosses the threshold', () => {
   // A way running east at one second per pixel, so it passes 900 s at x=900.
-  // The map's region of 900 s or less is every point with such a way within
-  // half a zone width, so its edge is half a width further out - which is why
-  // a value placed on the way's own crossing floated inside the band, near a
-  // line but never on it.
+  // Ground belongs to the way nearest to it, so the band on this way changes
+  // exactly there. Taking instead the smallest time within half a zone width
+  // put the boundary half a width further out, and cut it as an arc of that
+  // radius wherever a way ended.
   const halfWidthPx = 30;
   const segments = [];
   for (let x = 0; x < 1400; x += 10) {
@@ -176,7 +176,39 @@ test('the drawn boundary lies a zone half-width beyond the way that crosses it',
   const xs = points.map((point) => point[0]).sort((a, b) => a - b);
   const middle = xs[Math.floor(xs.length / 2)];
   assert.ok(
-    Math.abs(middle - (900 + halfWidthPx)) <= 3 * field.cellPx,
-    `boundary at x=${middle}, expected about ${900 + halfWidthPx}, not the crossing at 900`,
+    Math.abs(middle - 900) <= 2 * field.cellPx,
+    `boundary at x=${middle}, expected the way's own crossing at 900`,
+  );
+});
+
+test('ground between two ways divides halfway between them', () => {
+  // Two ways running east, three hundred pixels apart, one either side of a
+  // band boundary. What separates their bands is the midline between them -
+  // which is what the reader reads as the isoline - and not an arc at the
+  // reach of either.
+  const halfWidthPx = 400;
+  const segments = [];
+  for (let x = 0; x < 1000; x += 10) {
+    segments.push(x, 100, 600, x + 10, 100, 600);
+    segments.push(x, 400, 1200, x + 10, 400, 1200);
+  }
+  const field = buildDrawnBandField(Float64Array.from(segments), {
+    originXPx: 0,
+    originYPx: 0,
+    scale: 1,
+    widthPx: 1000,
+    heightPx: 600,
+    halfWidthPx,
+    bandSeconds: 900,
+    cellPx: 4,
+  });
+  const points = collectDrawnContourPoints(field).get(900);
+
+  assert.ok(points && points.length > 0, 'the boundary between them was not found');
+  const ys = points.map((point) => point[1]).sort((a, b) => a - b);
+  const middle = ys[Math.floor(ys.length / 2)];
+  assert.ok(
+    Math.abs(middle - 250) <= 2 * field.cellPx,
+    `boundary at y=${middle}, expected the midline at 250`,
   );
 });

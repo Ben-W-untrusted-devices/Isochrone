@@ -89,20 +89,24 @@ export function collectBandBoundaryCrossings(segments, bandSeconds) {
 /**
  * The field the map draws, on a coarse grid of the output.
  *
- * A point is in the map's ≤T region when some way within half a zone width of
- * it has a time of T or less, so the drawn field is the smallest time over the
- * ways near each point - a minimum taken over a disc of the zone's half width.
- * That is not the same as the time on the ways themselves: along a way, the
- * smallest time within half a width is the time from half a width further in,
- * so the drawn boundary sits outside the way's own crossing of a threshold by
- * about that distance. Labels placed on the crossings therefore floated inside
- * the band, near a line but never on it.
+ * Ground belongs to the way nearest to it, and carries that way's time. So the
+ * ground between two ways divides halfway between them, and where those two
+ * ways are in different bands that midline is the boundary between the bands -
+ * which is what the reader sees as the isoline. A way's own band changes
+ * exactly where its own time crosses a threshold.
  *
- * Built the same way the GPU builds it - splat the ways, then take the minimum
- * over the neighbourhood - so what the labels are placed against is what the
- * reader sees. Coarse because a label only has to land within its own text
- * height of the line, and the grid is what makes this cheap enough to do on
- * the processor for the export as well as the screen.
+ * The alternative - the smallest time anywhere within half a zone width - is a
+ * different map, and the wrong one: it cuts a band's edge as a circular arc of
+ * that radius wherever a way ends, and lets a fast road crossing a slow one
+ * pull its own lower time onto the slow road's ground.
+ *
+ * Nothing further than half a zone width from any way belongs to a way at all;
+ * that is the limit of travel, and the only place an arc of that radius is the
+ * right shape.
+ *
+ * Built the same way the fragment program builds it, so what the labels are
+ * placed against is what the reader sees. Coarse because a label only has to
+ * land within its own text height of the line.
  */
 export function buildDrawnBandField(segments, options) {
   const {
@@ -121,10 +125,12 @@ export function buildDrawnBandField(segments, options) {
   const toY = (graphY) => (graphY - originYPx) * scale;
   const columns = Math.max(1, Math.ceil(widthPx / cellPx) + 1);
   const rows = Math.max(1, Math.ceil(heightPx / cellPx) + 1);
-  const times = new Float64Array(columns * rows).fill(Number.POSITIVE_INFINITY);
+  const distances = new Float32Array(columns * rows).fill(Number.POSITIVE_INFINITY);
+  const times = new Float64Array(columns * rows);
 
   // The ways themselves, sampled into the grid at its own resolution so a long
-  // rural way does not leave gaps between its ends.
+  // rural way does not leave gaps between its ends. Where two ways share a
+  // cell the earlier one takes it, which is the only tie this has to break.
   const margin = halfWidthPx + cellPx;
   for (let offset = 0; offset + 5 < segments.length; offset += RIBBON_SEGMENT_STRIDE) {
     const fromX = toX(segments[offset]);
@@ -149,60 +155,61 @@ export function buildDrawnBandField(segments, options) {
       }
       const seconds = fromSeconds + (toSeconds - fromSeconds) * fraction;
       const index = row * columns + column;
-      if (seconds < times[index]) {
+      if (distances[index] > 0 || seconds < times[index]) {
+        distances[index] = 0;
         times[index] = seconds;
       }
     }
   }
 
-  // The minimum over the zone's half width, as two passes of a running window.
-  const reach = Math.max(1, Math.round(halfWidthPx / cellPx));
-  minimiseAlongRows(times, columns, rows, reach);
-  minimiseAlongColumns(times, columns, rows, reach);
+  spreadToNearestWay(distances, times, columns, rows);
 
+  const reach = halfWidthPx / cellPx;
   const bands = new Int32Array(columns * rows);
   for (let index = 0; index < bands.length; index += 1) {
-    const seconds = times[index];
-    bands[index] = Number.isFinite(seconds) ? Math.floor(seconds / bandSeconds) : -1;
+    bands[index] = distances[index] <= reach ? Math.floor(times[index] / bandSeconds) : -1;
   }
   return { bands, columns, rows, cellPx, bandSeconds };
 }
 
-function minimiseAlongRows(times, columns, rows, reach) {
-  const line = new Float64Array(columns);
+/**
+ * Carries each way's time out to the cells nearest to it.
+ *
+ * Two sweeps of a chamfer distance transform - down and to the right, then up
+ * and to the left - which gives a distance good to a few percent for two
+ * passes over the grid rather than a search per cell. Each cell ends up
+ * holding the distance to the nearest way and that way's time.
+ */
+function spreadToNearestWay(distances, times, columns, rows) {
+  const diagonal = Math.SQRT2;
+  const relax = (index, fromIndex, step) => {
+    const candidate = distances[fromIndex] + step;
+    if (candidate < distances[index]) {
+      distances[index] = candidate;
+      times[index] = times[fromIndex];
+    }
+  };
+
   for (let row = 0; row < rows; row += 1) {
-    const base = row * columns;
-    line.set(times.subarray(base, base + columns));
     for (let column = 0; column < columns; column += 1) {
-      let smallest = line[column];
-      const from = Math.max(0, column - reach);
-      const to = Math.min(columns - 1, column + reach);
-      for (let near = from; near <= to; near += 1) {
-        if (line[near] < smallest) {
-          smallest = line[near];
-        }
+      const index = row * columns + column;
+      if (row > 0) {
+        relax(index, index - columns, 1);
+        if (column > 0) relax(index, index - columns - 1, diagonal);
+        if (column + 1 < columns) relax(index, index - columns + 1, diagonal);
       }
-      times[base + column] = smallest;
+      if (column > 0) relax(index, index - 1, 1);
     }
   }
-}
-
-function minimiseAlongColumns(times, columns, rows, reach) {
-  const line = new Float64Array(rows);
-  for (let column = 0; column < columns; column += 1) {
-    for (let row = 0; row < rows; row += 1) {
-      line[row] = times[row * columns + column];
-    }
-    for (let row = 0; row < rows; row += 1) {
-      let smallest = line[row];
-      const from = Math.max(0, row - reach);
-      const to = Math.min(rows - 1, row + reach);
-      for (let near = from; near <= to; near += 1) {
-        if (line[near] < smallest) {
-          smallest = line[near];
-        }
+  for (let row = rows - 1; row >= 0; row -= 1) {
+    for (let column = columns - 1; column >= 0; column -= 1) {
+      const index = row * columns + column;
+      if (row + 1 < rows) {
+        relax(index, index + columns, 1);
+        if (column > 0) relax(index, index + columns - 1, diagonal);
+        if (column + 1 < columns) relax(index, index + columns + 1, diagonal);
       }
-      times[row * columns + column] = smallest;
+      if (column + 1 < columns) relax(index, index + 1, 1);
     }
   }
 }

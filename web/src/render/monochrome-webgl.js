@@ -263,9 +263,19 @@ void main(void) {
   if (distance(screen, v_from + along * travelled) > u_halfWidthPx) {
     discard;
   }
-  float unit = clamp(mix(v_seconds.x, v_seconds.y, travelled) / u_maxSeconds, 0.0, 1.0);
-  ${dialect.fragDepth} = unit;
-  ${dialect.colour} = packUnitFloat(unit);
+  // The nearest way wins, not the earliest.
+  //
+  // Keeping the smallest time within half a width made the ground belong to
+  // whichever way nearby was quickest, which is a different map: it cut the
+  // edge of a band as a circular arc at that radius, and let a fast road
+  // crossing a slow one pull its own lower time onto the slow road's ground.
+  // With the nearest way winning, the ground between two ways divides halfway
+  // between them - which is the boundary between their bands - and a way's own
+  // band changes exactly where its own time crosses.
+  ${dialect.fragDepth} = distance(screen, v_from + along * travelled) / u_halfWidthPx;
+  ${dialect.colour} = packUnitFloat(
+    clamp(mix(v_seconds.x, v_seconds.y, travelled) / u_maxSeconds, 0.0, 1.0)
+  );
 }`;
 
   const compositeVertex = `${isWebGl2 ? dialect.header : ''}

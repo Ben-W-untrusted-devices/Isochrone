@@ -311,10 +311,8 @@ test('the scene carries the ways as zones, sized from the sheet', () => {
   assert.equal(scene.ribbons.bandSeconds, 900, '30 minutes over two patterns');
   // 15 mm of finished sheet, not a pixel count chosen for one device.
   assert.ok(Math.abs(scene.ribbons.widthPx - 15 * (96 / 25.4)) < 1e-9);
-  // The boundary of a zone is much longer than the way it surrounds - a
-  // fifteen millimetre skin around ten metres of road - so even this carries
-  // its value, and the value is the boundary's own time.
-  assert.equal(scene.labels.length, 1);
-  assert.equal(scene.labels[0].text, '15 min');
-  assert.equal(scene.labels[0].seconds, 900);
+  // Ground belongs to the way nearest it, so the boundary here is where these
+  // ten metres of road cross fifteen minutes - a line far too short to seat a
+  // value on, and one that is left unlabelled rather than labelled badly.
+  assert.deepEqual(scene.labels, []);
 });
