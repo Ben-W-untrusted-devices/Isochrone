@@ -4,8 +4,10 @@ Making the isochrone read correctly on devices with no colour: black-and-white
 printers, basic e-Ink, and for viewers with total colourblindness
 (achromatopsia).
 
-Status: **plan only, nothing implemented.** Written 2026-08-21; grid
-allocation section revised 2026-08-23 once that work landed.
+Status: **in progress on branch `true-monochrome`.** Written 2026-08-21; grid
+allocation section revised 2026-08-23 once that work landed; the cyclic
+question settled 2026-08-31 (see "The cyclic problem"), and contour extraction
+implemented.
 
 ## Why the current output fails
 
@@ -68,7 +70,42 @@ vertex counts that explode along every cul-de-sac. It also does not avoid an
 arbitrary parameter, since the buffer radius plays exactly the role a raster
 cell size would.
 
-**Chosen: rasterise the per-band vector geometry, then contour it.** The vector
+**Superseded 2026-09-02: triangulate the nodes, then classify triangles.**
+
+The choice below was made between buffer-and-union and a raster, and never
+considered the construction that actually suits this. Buffer-and-union really
+is a bad idea, for the reasons given. A raster is a worse one than the section
+admitted: its cell size is not merely "an arbitrary parameter", it makes the
+drawing resolution-dependent, so the same map has to be re-derived for every
+output size and mottles as you zoom. A poster and a screen ended up with
+different geometry for the same isochrone.
+
+Delaunay-triangulate the node positions instead. A triangle is reachable by the
+time its slowest corner is, so each falls in exactly one band, and merging the
+triangles of a band is combinatorial rather than geometric: an edge shared by
+two same-band triangles cancels against its own reverse, and what is left is
+the boundary, already correctly wound. No boolean geometry, no tolerance, no
+cell size. Holes and disjoint components need no special handling at all - a
+park with no paths simply has no triangles, and a transit isochrone landing in
+several places simply produces several rings.
+
+The triangulation depends only on where the nodes are, so it is built once per
+region and kept: Berlin's 578,000 nodes take about 390 ms and yield 1.15
+million triangles, after which a routing run only reclassifies them. Panning
+and zooming touch no geometry at all.
+
+One length survives - the span above which a triangle is judged to bridge a gap
+rather than cover ground - but unlike a cell size it is in metres, it is
+resolution-independent, and Delaunay's habit of maximising the minimum angle is
+what makes it meaningful: a river or the edge of the network shows up as a long
+thin triangle, and a city block does not.
+
+See `web/src/render/delaunay.js` and `web/src/render/band-regions.js`.
+
+---
+
+**Rejected in the original plan, and wrong: rasterise the per-band vector
+geometry, then contour it.** The vector
 edge geometry remains the source of truth; a raster is used only as a transient
 rendering intermediate, sized to the output (a poster is ~4576px wide), then
 discarded. Marching squares over that gives closed rings directly.
@@ -113,10 +150,30 @@ Bands repeat every `cycleMinutes`. Filled and hatched, band 6 is
 indistinguishable from band 1 - worse than with colour, where repetition at
 least reads as repetition.
 
-**Contour labels ("36 min") are mandatory here, not optional.** The alternative
-is capping monochrome output at a single cycle. This decision should be made
-before implementation starts, because label placement along contours is a
-significant piece of work on its own and materially changes the estimate.
+**Decided 2026-08-31: labels, and the cycle stays.**
+
+Contour labels ("36 min") are mandatory, on the same footing as isobar values
+on a weather chart or height figures on an Ordnance Survey sheet - and for the
+same reason. A contour map without values on the contours is a picture of a
+gradient, not a measurement. Capping at a single cycle was rejected outright:
+an OS sheet does not stop drawing at 500 m, and neither should this.
+
+An intermediate proposal - drop the modulo in monochrome so that bands run
+monotonically over one cycle with an open-ended top band - was also rejected.
+It buys unambiguity at the price of the map's range, which is the wrong trade
+when labels can buy the same unambiguity and keep the range.
+
+So monochrome keeps the cyclic structure the colour palette has: a repeating
+cycle of *n* fill patterns, with the labels telling you which cycle you are
+in. Both attached references do exactly this - Paullin's "Rates of Travel"
+plates label every contour ("6wks.", "1 day", "36hrs.") and a two-tone
+alternating fill with numbered regions carries the repeat.
+
+`n` is deliberately not fixed here. Patterns need high contrast between
+neighbours, and it may turn out that the honest answer at 1 bit is n=2 -
+literally "none" and "some". That is not guessable from first principles, so
+the encoding takes `n` as a parameter and the number is settled by looking at
+real output on real paper.
 
 ## Interaction with grid allocation
 
@@ -136,6 +193,18 @@ would reintroduce exactly what was removed.
 
 ## Verification
 
+**Rasterise the output and look at it at 1:1.** `web/tools/render-monochrome.mjs`
+writes an SVG; `rsvg-convert -w 1500 -b white out.svg -o out.png` turns it into
+something that can actually be inspected. This is not a nicety. Reviewing the
+SVG in a viewport that downscaled it hid, in turn: a water pattern that was
+never drawn at all (a sub-pixel stroke snapped away by `crispEdges`), ferry
+routes drawn as roads and striking off the sheet, and a coastline registered
+kilometres from the road network it describes. Each was obvious within seconds
+of looking at a raster, and invisible for two rounds without one.
+
+Note also that a "detail view" of an SVG is meaningless - it is vector, the
+reader can zoom. A detail *raster* is worth producing.
+
 "Looks fine to me" is how the current palette shipped, so:
 
 - **Pattern coverage test.** Per above - objective, and cheap to run in CI.
@@ -148,6 +217,13 @@ would reintroduce exactly what was removed.
   hole and a known disjoint component must produce the expected ring counts and
   containment.
 - Actual paper is a human check; it cannot be automated here.
+
+**Anything drawn alongside the isochrone must go through
+`projectBoundaryBasemapToGraphPaths`.** The boundary payload carries its own
+projected origin and extent, and they are not the graph's - for Portsmouth the
+origins differ by 2.4 km east and 14.2 km north, and the extents by a factor of
+1.23. Rescaling one onto the other, rather than projecting it, puts the
+coastline nowhere near the roads it belongs to.
 
 ## Suggested sequencing
 

@@ -104,6 +104,7 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
         "controls-menu-summary",
         "theme-radio-group",
         "primary-mouse-button-group",
+        "map-style-radio-group",
         "unit-system-radio-group",
         "mode-checkbox-group",
         "colour-cycle-minutes",
@@ -150,8 +151,10 @@ def test_index_html_exposes_expected_runtime_shell_contract() -> None:
     for group_id in (
         "mode-checkbox-group",
         "theme-radio-group",
+        "map-style-radio-group",
         "unit-system-radio-group",
         "primary-mouse-button-group",
+        "map-style-radio-group",
     ):
         assert parsed.elements_by_id[group_id].tag == "fieldset", group_id
 
