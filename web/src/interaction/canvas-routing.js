@@ -29,6 +29,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     mapClientPointToCanvasPixel,
     parseNodeIndexFromLocationSearch,
     persistNodeIndexToLocation,
+    persistMapViewportToLocation,
     renderIsochroneLegendIfNeeded,
     runWalkingIsochroneFromSourceNode,
     setRoutingStatus,
@@ -91,6 +92,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
   let activeRunToken = null;
   let isDisposed = false;
   let activePointerGesture = null;
+  let persistViewportTimer = null;
   let activeTouchPoints = new Map();
   let activeTouchGesture = null;
   let pendingTouchTap = null;
@@ -800,6 +802,22 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     return applyViewport(nextViewport, { updateScaleBar: true });
   }
 
+  // Written to the address bar a moment after the map stops moving, not on
+  // every frame of a drag: replaceState is not free and a browser will start
+  // refusing it if called at frame rate.
+  function schedulePersistViewport() {
+    if (typeof persistMapViewportToLocation !== 'function') {
+      return;
+    }
+    if (persistViewportTimer !== null) {
+      clearTimeout(persistViewportTimer);
+    }
+    persistViewportTimer = setTimeout(() => {
+      persistViewportTimer = null;
+      persistMapViewportToLocation(mapData.viewport ?? null);
+    }, 250);
+  }
+
   function applyViewport(nextViewport, applyOptions = {}) {
     if (!nextViewport) {
       return false;
@@ -824,8 +842,10 @@ export function bindCanvasClickRouting(shell, mapData, options = {}, dependencie
     if (typeof redrawViewport === 'function') {
       redrawViewport(shell, mapData);
     }
+    schedulePersistViewport();
     return true;
   }
+
 }
 
 function getPointerButtonMask(button) {

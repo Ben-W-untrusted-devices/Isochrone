@@ -24,12 +24,15 @@ import {
   mapCanvasPixelToGraphMeters,
   mapClientPointToCanvasPixel,
   parseLocationIdFromLocationSearch,
+  parseMapViewportFromLocationSearch,
   parseNodeIndexFromLocationSearch,
   persistLocationIdToLocation,
+  persistMapViewportToLocation,
   persistNodeIndexToLocation,
 } from './core/coords.js';
 import {
   createDefaultMapViewport,
+  normalizeMapViewport,
   resolveViewportFrame,
 } from './core/viewport.js';
 import {
@@ -221,12 +224,14 @@ export {
   parseLocationIdFromLocationSearch,
   parseModeValuesFromLocationSearch,
   parseNodeIndexFromLocationSearch,
+  parseMapViewportFromLocationSearch,
   parseWalkSpeedKphFromLocationSearch,
   persistBikeSpeedKphToLocation,
   persistColourCycleMinutesToLocation,
   persistDepartureDatetimeToLocation,
   persistLocationIdToLocation,
   persistModeValuesToLocation,
+  persistMapViewportToLocation,
   persistNodeIndexToLocation,
   persistWalkSpeedKphToLocation,
 } from './core/coords.js';
@@ -725,6 +730,7 @@ export function bindCanvasClickRouting(shell, mapData, options = {}) {
     mapClientPointToCanvasPixel,
     parseNodeIndexFromLocationSearch,
     persistNodeIndexToLocation,
+    persistMapViewportToLocation,
     renderIsochroneLegendIfNeeded,
     runWalkingIsochroneFromSourceNode,
     setRoutingStatus,
@@ -3492,6 +3498,23 @@ if (typeof window !== 'undefined' && typeof globalThis.document !== 'undefined')
           transitDateRange: nextLocation.transitDateRange,
           transitAttribution: nextLocation.transitAttribution,
         });
+        // The view in the address bar belongs to the region that was in it.
+        // Restored when this is that region arriving for the first time, and
+        // cleared otherwise: a scale and a corner from somewhere else would
+        // put the new place off the edge of its own map.
+        const restoredViewport = previousMapData === null
+          ? parseMapViewportFromLocationSearch(globalThis.location?.search ?? '')
+          : null;
+        if (restoredViewport) {
+          mapData.viewport = normalizeMapViewport(mapData.graph.header, restoredViewport, {
+            frameWidthPx: shell.isochroneCanvas.width,
+            frameHeightPx: shell.isochroneCanvas.height,
+            fitBoundingBoxPx: mapData.boundaryFitBoundingBoxPx,
+          });
+        } else {
+          persistMapViewportToLocation(null);
+        }
+
         initializedMapData = mapData;
         currentLocationId = nextLocation.id;
         shell.locationSelect.value = nextLocation.id;

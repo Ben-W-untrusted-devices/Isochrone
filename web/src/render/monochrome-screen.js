@@ -414,14 +414,21 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
       // What a zone is clipped to. All of it: the sheet does not say where
       // anyone can stand on water.
       clipFeatures: waterFeatures,
-      roadSegments: collectVisibleRoadSegments(
-        mapData,
-        graph,
-        mapData.nodePixels,
-        frame,
-        widthPx,
-        heightPx,
+      // Every road of this class, in graph pixels, kept between frames. The
+      // GPU widens and clips them itself, so nothing here depends on where the
+      // map is scrolled to.
+      allRoadSegments: getOrBuildRoadSegmentsForClass(
+        mapData, graph, mapData.nodePixels, minimumRoadClassForScale(frame.effectiveScale),
       ),
+      // The same roads cut down to the frame, for the renderers that widen
+      // them on the processor. Built only if one of them asks.
+      get roadSegments() {
+        const visible = collectVisibleRoadSegments(
+          mapData, graph, mapData.nodePixels, frame, widthPx, heightPx,
+        );
+        Object.defineProperty(this, 'roadSegments', { value: visible });
+        return visible;
+      },
     },
   };
 }

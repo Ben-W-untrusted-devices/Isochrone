@@ -94,6 +94,8 @@ export const WALK_SPEED_QUERY_PARAM = 'walkKph';
 export const BIKE_SPEED_QUERY_PARAM = 'bikeKph';
 export const TRANSIT_WALK_BUDGET_QUERY_PARAM = 'walkMin';
 export const MAP_STYLE_QUERY_PARAM = 'style';
+// Where the map is looking: scale, then the top-left corner in graph pixels.
+export const MAP_VIEWPORT_QUERY_PARAM = 'view';
 export const MAP_STYLE_COLOUR = 'colour';
 export const MAP_STYLE_MONOCHROME = 'monochrome';
 export const EDGE_INTERPOLATION_SLACK_SECONDS = 0.75;

@@ -8,6 +8,7 @@ import {
   MAP_STYLE_COLOUR,
   MAP_STYLE_MONOCHROME,
   MAP_STYLE_QUERY_PARAM,
+  MAP_VIEWPORT_QUERY_PARAM,
   MODE_SELECTION_QUERY_PARAM,
   SELECTED_REGION_QUERY_PARAM,
   WALK_SPEED_QUERY_PARAM,
@@ -422,5 +423,59 @@ export function persistMapStyleToLocation(mapStyle, options = {}) {
   }
   nextUrl.searchParams.set(MAP_STYLE_QUERY_PARAM, normalized);
   historyObject.replaceState(null, '', nextUrl.toString());
+  return true;
+}
+
+/**
+ * The view in the address bar: scale, then the top-left corner in graph pixels.
+ *
+ * Rounded to a hundredth of a pixel, which is far finer than anything anyone
+ * can see and keeps the link short enough to send to someone.
+ */
+export function parseMapViewportFromLocationSearch(locationSearch) {
+  if (typeof locationSearch !== 'string' || locationSearch.length === 0) {
+    return null;
+  }
+  const raw = new URLSearchParams(locationSearch).get(MAP_VIEWPORT_QUERY_PARAM);
+  if (raw === null) {
+    return null;
+  }
+  const parts = raw.split(',');
+  if (parts.length !== 3) {
+    return null;
+  }
+  const [scale, offsetXPx, offsetYPx] = parts.map((part) => Number.parseFloat(part));
+  if (!(scale > 0) || !Number.isFinite(offsetXPx) || !Number.isFinite(offsetYPx)) {
+    return null;
+  }
+  return { scale, offsetXPx, offsetYPx };
+}
+
+export function persistMapViewportToLocation(viewport, options = {}) {
+  const locationObject = options.locationObject ?? globalThis.location ?? null;
+  const historyObject = options.historyObject ?? globalThis.history ?? null;
+  if (!locationObject || typeof locationObject.href !== 'string') {
+    return false;
+  }
+  if (!historyObject || typeof historyObject.replaceState !== 'function') {
+    return false;
+  }
+
+  const nextUrl = new URL(locationObject.href);
+  const round = (value) => Math.round(value * 100) / 100;
+  // A null viewport clears it, which is what a change of region wants: the new
+  // place has nothing to do with where the old one was looking.
+  const text = viewport === null
+    ? null
+    : `${round(viewport.scale)},${round(viewport.offsetXPx)},${round(viewport.offsetYPx)}`;
+  if (nextUrl.searchParams.get(MAP_VIEWPORT_QUERY_PARAM) === text) {
+    return false;
+  }
+  if (text === null) {
+    nextUrl.searchParams.delete(MAP_VIEWPORT_QUERY_PARAM);
+  } else {
+    nextUrl.searchParams.set(MAP_VIEWPORT_QUERY_PARAM, text);
+  }
+  historyObject.replaceState(null, '', `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
   return true;
 }

@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  parseMapViewportFromLocationSearch,
+  persistMapViewportToLocation,
+} from '../src/core/coords.js';
+import {
   GRAPH_MAGIC,
   MinHeap,
   WASM_REQUIRED_MESSAGE,
@@ -2427,6 +2431,31 @@ test('runConnectionScanFromWalkingReachableStops will not walk past the budget t
     walkBudgetSeconds: 120,
   });
   assert.equal(beyondBudget.seedNodeIndices.length, 0);
+});
+
+test('the view is carried in the address bar, and cleared when the region changes', () => {
+  // A scale and a corner belong to the region they were taken in. Carried over
+  // to another one they would put the new place off the edge of its own map,
+  // so a change of region drops them rather than reinterpreting them.
+  const location = { href: 'https://example.test/web/?region=berlin&view=2.5,100.5,200.25' };
+  assert.deepEqual(
+    parseMapViewportFromLocationSearch(new URL(location.href).search),
+    { scale: 2.5, offsetXPx: 100.5, offsetYPx: 200.25 },
+  );
+
+  let written = null;
+  const historyObject = { replaceState: (_state, _title, url) => { written = url; } };
+  persistMapViewportToLocation(
+    { scale: 1.234567, offsetXPx: 10.987654, offsetYPx: -3.5 },
+    { locationObject: location, historyObject },
+  );
+  assert.match(written, /view=1\.23%2C10\.99%2C-3\.5/, `wrote ${written}`);
+
+  persistMapViewportToLocation(null, {
+    locationObject: { href: `https://example.test${written}` },
+    historyObject,
+  });
+  assert.doesNotMatch(written, /view=/, `clearing left ${written}`);
 });
 
 test('the colour basemap and key come back only when there is no map to draw', () => {

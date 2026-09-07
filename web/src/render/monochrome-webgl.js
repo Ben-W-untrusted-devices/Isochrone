@@ -321,7 +321,12 @@ void main(void) {
   // this field steps rather than slopes - it jumps where a different way
   // becomes the nearest in time - and across a step that rate is meaningless
   // and made the line as wide as the step was large.
-  vec2 reach = u_contourHalfPx / u_viewportPx;
+  //
+  // The reach is at least one whole pixel of the field. Below that the four
+  // samples land back in the same texel as the fragment, every band comes out
+  // equal to its own, and the line disappears everywhere except the outer
+  // edge, which is found by a different test at a wider radius.
+  vec2 reach = max(u_contourHalfPx, 1.0) / u_viewportPx;
   float left = bandAt(uv - vec2(reach.x, 0.0));
   float right = bandAt(uv + vec2(reach.x, 0.0));
   float below = bandAt(uv - vec2(0.0, reach.y));
@@ -343,6 +348,61 @@ void main(void) {
 
   return { fieldVertex, fieldFragment, compositeVertex, compositeFragment };
 }
+
+// A plain stroked line, one instance per segment.
+//
+// The same expansion the zones use, without the field: the segment stays in
+// graph pixels and the vertex program widens it in output space. Roads are
+// what this is for. Culling them to the frame and widening them into quads on
+// the CPU cost more the further in you zoomed, because that is where the finer
+// road classes switch on - hundreds of thousands of segments rebuilt for every
+// frame of a drag, which is exactly the wrong way round.
+const STROKE_VERTEX_SOURCE = `
+attribute vec2 a_corner;
+attribute vec2 a_from;
+attribute vec2 a_to;
+uniform highp vec2 u_viewportPx;
+uniform highp vec2 u_originPx;
+uniform highp float u_scale;
+uniform highp float u_halfWidthPx;
+varying highp vec2 v_from;
+varying highp vec2 v_to;
+void main(void) {
+  vec2 from = (a_from - u_originPx) * u_scale;
+  vec2 to = (a_to - u_originPx) * u_scale;
+  v_from = from;
+  v_to = to;
+  vec2 along = to - from;
+  float span = length(along);
+  vec2 direction = span > 0.0 ? along / span : vec2(1.0, 0.0);
+  vec2 across = vec2(-direction.y, direction.x);
+  vec2 base = a_corner.x < 0.0 ? from : to;
+  vec2 screen = base
+    + direction * (a_corner.x * u_halfWidthPx)
+    + across * (a_corner.y * u_halfWidthPx);
+  vec2 clip = (screen / u_viewportPx) * 2.0 - 1.0;
+  gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
+}`;
+
+const STROKE_FRAGMENT_SOURCE = `
+precision highp float;
+uniform highp vec2 u_viewportPx;
+uniform highp float u_halfWidthPx;
+uniform vec4 u_ink;
+varying highp vec2 v_from;
+varying highp vec2 v_to;
+void main(void) {
+  vec2 screen = vec2(gl_FragCoord.x, u_viewportPx.y - gl_FragCoord.y);
+  vec2 along = v_to - v_from;
+  float lengthSquared = dot(along, along);
+  float travelled = lengthSquared > 0.0
+    ? clamp(dot(screen - v_from, along) / lengthSquared, 0.0, 1.0)
+    : 0.0;
+  if (distance(screen, v_from + along * travelled) > u_halfWidthPx) {
+    discard;
+  }
+  gl_FragColor = u_ink;
+}`;
 
 const LINE_VERTEX_SOURCE = FILL_VERTEX_SOURCE;
 const LINE_FRAGMENT_SOURCE = `
@@ -602,6 +662,9 @@ export function createMonochromeWebGlPainter(gl, options = {}) {
 
   // The field path needs a per-fragment depth and screen-space derivatives.
   // Without either, the older ordering is what draws.
+  const strokeProgram = instancing === null
+    ? null
+    : createWebGlProgram(gl, STROKE_VERTEX_SOURCE, STROKE_FRAGMENT_SOURCE);
   const fieldSources = instancing === null ? null : fieldShaderSources(gl);
   // A context that cannot build these still has the older ordering, so a
   // failure here is a fallback rather than a broken renderer.
@@ -630,6 +693,19 @@ export function createMonochromeWebGlPainter(gl, options = {}) {
     ribbonBuffer: gl.createBuffer(),
     ribbonCornerBuffer: gl.createBuffer(),
     ribbonSegments: null,
+    strokeBuffer: gl.createBuffer(),
+    strokeSource: null,
+    stroke: strokeProgram === null ? null : {
+      program: strokeProgram,
+      corner: gl.getAttribLocation(strokeProgram, 'a_corner'),
+      from: gl.getAttribLocation(strokeProgram, 'a_from'),
+      to: gl.getAttribLocation(strokeProgram, 'a_to'),
+      viewport: gl.getUniformLocation(strokeProgram, 'u_viewportPx'),
+      origin: gl.getUniformLocation(strokeProgram, 'u_originPx'),
+      scale: gl.getUniformLocation(strokeProgram, 'u_scale'),
+      halfWidth: gl.getUniformLocation(strokeProgram, 'u_halfWidthPx'),
+      ink: gl.getUniformLocation(strokeProgram, 'u_ink'),
+    },
     field: fieldProgram === null ? null : {
       program: fieldProgram,
       corner: gl.getAttribLocation(fieldProgram, 'a_corner'),
@@ -1026,6 +1102,57 @@ function releaseRibbonAttributes(state, program) {
   }
 }
 
+/**
+ * Strokes segments held in graph pixels, widened on the GPU.
+ *
+ * Uploaded once and kept while the same array is being drawn, so panning and
+ * zooming change two uniforms and nothing else. Everything off the frame is
+ * clipped by the hardware, which is cheaper than deciding on the CPU what to
+ * leave out.
+ */
+function drawInstancedStrokes(state, segments, frame, widthPx, ink, viewport) {
+  const { gl, stroke, instancing } = state;
+  if (!stroke || !segments || segments.length < 4) {
+    return;
+  }
+  gl.useProgram(stroke.program);
+
+  if (state.strokeSource !== segments) {
+    gl.bindBuffer(gl.ARRAY_BUFFER, state.strokeBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, segments, gl.STATIC_DRAW);
+    state.strokeSource = segments;
+  }
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, state.ribbonCornerBuffer);
+  gl.enableVertexAttribArray(stroke.corner);
+  gl.vertexAttribPointer(stroke.corner, 2, gl.FLOAT, false, 0, 0);
+  instancing.divisor(stroke.corner, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, state.strokeBuffer);
+  for (const [location, offset] of [[stroke.from, 0], [stroke.to, 8]]) {
+    gl.enableVertexAttribArray(location);
+    gl.vertexAttribPointer(location, 2, gl.FLOAT, false, 16, offset);
+    instancing.divisor(location, 1);
+  }
+
+  gl.uniform2f(stroke.viewport, viewport[0], viewport[1]);
+  gl.uniform2f(stroke.origin, frame.offsetXPx, frame.offsetYPx);
+  gl.uniform1f(stroke.scale, frame.effectiveScale);
+  gl.uniform1f(stroke.halfWidth, Math.max(0.5, widthPx / 2));
+  gl.uniform4fv(stroke.ink, ink);
+  instancing.draw(gl.TRIANGLES, 0, 6, Math.floor(segments.length / 4));
+
+  for (const location of [stroke.from, stroke.to]) {
+    if (location >= 0) {
+      instancing.divisor(location, 0);
+      gl.disableVertexAttribArray(location);
+    }
+  }
+  if (stroke.corner >= 0) {
+    gl.disableVertexAttribArray(stroke.corner);
+  }
+}
+
 function drawTriangles(state, vertices, ink, viewport) {
   if (vertices.length < 6) {
     return;
@@ -1115,20 +1242,14 @@ export function drawMonochromeSceneWebGl(state, scene) {
     drawTriangles(state, Float32Array.from(districts), ink, viewport);
   }
 
-  const roads = basemap.roadSegments;
-  if (roads && roads.length >= 4) {
-    const quads = [];
-    for (let index = 0; index + 3 < roads.length; index += 4) {
-      appendThickPolyline(
-        quads,
-        Float64Array.of(roads[index], roads[index + 1], roads[index + 2], roads[index + 3]),
-        transform,
-        Math.max(1, scene.roadStrokeWidth),
-        false,
-      );
-    }
-    drawTriangles(
-      state, Float32Array.from(quads), parseCssColour(scene.roadInk ?? scene.ink), viewport,
+  if (state.stroke && basemap.allRoadSegments) {
+    drawInstancedStrokes(
+      state,
+      basemap.allRoadSegments,
+      scene.frame,
+      Math.max(1, scene.roadStrokeWidth),
+      parseCssColour(scene.roadInk ?? scene.ink),
+      viewport,
     );
   }
 
