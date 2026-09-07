@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  parseMapViewportFromLocationSearch,
+  persistMapViewportToLocation,
+} from '../src/core/coords.js';
+import {
   GRAPH_MAGIC,
   MinHeap,
   WASM_REQUIRED_MESSAGE,
@@ -10,9 +14,9 @@ import {
   computeExportDistanceScaleBar,
   createWebGlIsochroneRenderer,
   createNodeSpatialIndex,
-  clearTravelTimeGrid,
+  clearGrid,
   createPixelGrid,
-  createTravelTimeGrid,
+  setPixel,
   createWalkingSearchState,
   ensureWasmSupportOrShowError,
   findNearestNodeIndexForModeFromSpatialIndex,
@@ -46,13 +50,13 @@ import {
   drawBoundaryBasemapAlignedToGraphGrid,
   buildStaticEdgeNodeIndexedVertexData,
   layoutMapViewportToContainGraph,
+  rerenderIsochroneFromSnapshot,
   rerenderIsochroneFromSnapshotWithStatus,
   renderIsochroneLegendIfNeeded,
   runSearchTimeSliced,
   computeRenderGridExtent,
   resolveRenderGridRequirements,
   resolveSpatialIndexCellSizePx,
-  setTravelTimePixelMin,
   shouldUploadEdgeGeometry,
   updateDistanceScaleBar,
   timeToColour,
@@ -1192,11 +1196,8 @@ test('clearRenderedIsochrone clears stale routing snapshot and renderer state be
   };
   const pixelGrid = createPixelGrid(2, 2);
   pixelGrid.rgba.fill(255);
-  const travelTimeGrid = createTravelTimeGrid(2, 2);
-  travelTimeGrid.seconds.fill(12);
   const mapData = {
     pixelGrid,
-    travelTimeGrid,
     lastRoutingSnapshot: { sourceNodeIndex: 42 },
   };
 
@@ -1207,7 +1208,6 @@ test('clearRenderedIsochrone clears stale routing snapshot and renderer state be
   for (let i = 3; i < pixelGrid.rgba.length; i += 4) {
     assert.equal(pixelGrid.rgba[i], 0);
   }
-  assert.ok(Array.from(travelTimeGrid.seconds).every((value) => value === -1));
 });
 
 test('timeToColour wraps to the beginning after each configured cycle', () => {
@@ -2218,17 +2218,17 @@ test('grid writes use graph coordinates and clip outside the grid extent', () =>
   // Painters are unaware of the offset: they write graph pixel coordinates and
   // the grid subtracts its own origin, so anything off-extent falls out
   // through the bounds check that was already there.
-  const grid = createTravelTimeGrid(4, 4, { originXPx: 100, originYPx: 200 });
-  clearTravelTimeGrid(grid);
+  const grid = createPixelGrid(4, 4, { originXPx: 100, originYPx: 200 });
+  clearGrid(grid);
 
-  assert.equal(setTravelTimePixelMin(grid, 100, 200, 30), true, 'grid origin maps to cell 0,0');
-  assert.equal(grid.seconds[0], 30);
-  assert.equal(setTravelTimePixelMin(grid, 103, 203, 45), true);
-  assert.equal(grid.seconds[3 * 4 + 3], 45);
+  assert.equal(setPixel(grid, 100, 200, 1, 2, 3, 255), true, 'grid origin maps to cell 0,0');
+  assert.equal(grid.rgba[0], 1);
+  assert.equal(setPixel(grid, 103, 203, 4, 5, 6, 255), true);
+  assert.equal(grid.rgba[(3 * 4 + 3) * 4], 4);
 
-  assert.equal(setTravelTimePixelMin(grid, 99, 200, 10), false, 'left of the extent');
-  assert.equal(setTravelTimePixelMin(grid, 104, 200, 10), false, 'right of the extent');
-  assert.equal(setTravelTimePixelMin(grid, 100, 199, 10), false, 'above the extent');
+  assert.equal(setPixel(grid, 99, 200, 9, 9, 9, 255), false, 'left of the extent');
+  assert.equal(setPixel(grid, 104, 200, 9, 9, 9, 255), false, 'right of the extent');
+  assert.equal(setPixel(grid, 100, 199, 9, 9, 9, 255), false, 'above the extent');
 });
 
 test('spatial index buckets by node density instead of one cell per pixel', () => {
@@ -2281,33 +2281,18 @@ test('bucketed spatial index still returns the true nearest node', () => {
   }
 });
 
-test('a GPU renderer allocates neither raster fallback grid', () => {
-  // Every render path is
-  //   if (drawTravelTimeEdges) ... else if (drawTravelTimeGrid) ... else pixelGrid
-  // so a renderer that draws edges never reaches either grid. Allocating them
-  // anyway cost Berlin 61 MiB each - more than the canvas they would have been
-  // drawn into - for buffers nothing ever read.
+test('a GPU renderer allocates no raster fallback grid', () => {
+  // A renderer that draws edges never reaches the pixel grid. Allocating it
+  // anyway cost Berlin 61 MiB - more than the canvas it would have been drawn
+  // into - for a buffer nothing ever read.
   const webglRenderer = {
     drawTravelTimeEdges() {},
     drawTravelTimeEdgesFromNodeTimes() {},
-    drawTravelTimeGrid() {},
   };
-  const canvas2dRenderer = {};
 
-  assert.deepEqual(resolveRenderGridRequirements(webglRenderer), {
-    needsTravelTimeGrid: false,
-    needsPixelGrid: false,
-  });
+  assert.deepEqual(resolveRenderGridRequirements(webglRenderer), { needsPixelGrid: false });
   // The 2D fallback has no edge drawing, so it does need one.
-  assert.deepEqual(resolveRenderGridRequirements(canvas2dRenderer), {
-    needsTravelTimeGrid: false,
-    needsPixelGrid: true,
-  });
-  // A renderer with only the grid path gets the grid, not the pixel buffer.
-  assert.deepEqual(resolveRenderGridRequirements({ drawTravelTimeGrid() {} }), {
-    needsTravelTimeGrid: true,
-    needsPixelGrid: false,
-  });
+  assert.deepEqual(resolveRenderGridRequirements({}), { needsPixelGrid: true });
 });
 
 test('runConnectionScanFromWalkingReachableStops changes vehicle between two stops a short walk apart', () => {
@@ -2446,4 +2431,147 @@ test('runConnectionScanFromWalkingReachableStops will not walk past the budget t
     walkBudgetSeconds: 120,
   });
   assert.equal(beyondBudget.seedNodeIndices.length, 0);
+});
+
+test('the view is carried in the address bar, and cleared when the region changes', () => {
+  // A scale and a corner belong to the region they were taken in. Carried over
+  // to another one they would put the new place off the edge of its own map,
+  // so a change of region drops them rather than reinterpreting them.
+  const location = { href: 'https://example.test/web/?region=berlin&view=2.5,100.5,200.25' };
+  assert.deepEqual(
+    parseMapViewportFromLocationSearch(new URL(location.href).search),
+    { scale: 2.5, offsetXPx: 100.5, offsetYPx: 200.25 },
+  );
+
+  let written = null;
+  const historyObject = { replaceState: (_state, _title, url) => { written = url; } };
+  persistMapViewportToLocation(
+    { scale: 1.234567, offsetXPx: 10.987654, offsetYPx: -3.5 },
+    { locationObject: location, historyObject },
+  );
+  assert.match(written, /view=1\.23%2C10\.99%2C-3\.5/, `wrote ${written}`);
+
+  persistMapViewportToLocation(null, {
+    locationObject: { href: `https://example.test${written}` },
+    historyObject,
+  });
+  assert.doesNotMatch(written, /view=/, `clearing left ${written}`);
+});
+
+test('the colour basemap and key come back only when there is no map to draw', () => {
+  // Monochrome supplies its own coastline, roads and key, so those are hidden
+  // while it is on screen. The colour chrome is the right answer when there is
+  // no map data at all - mid region switch, before the new graph has arrived -
+  // and the wrong answer once there is, because a loaded region has a
+  // monochrome map to show whether or not anything has been routed on it yet.
+  const drawnScenes = [];
+  const shell = {
+    isochroneCanvas: {
+      width: 100,
+      height: 100,
+      style: {},
+      __isochroneRenderer: {
+        draw() {},
+        drawMonochromeScene(scene) {
+          drawnScenes.push(scene);
+        },
+        clear() {},
+      },
+    },
+    boundaryCanvas: { style: { visibility: 'hidden' } },
+    isochroneLegend: { style: { visibility: 'hidden' } },
+    mapStyleRadios: [
+      { value: 'colour', checked: false },
+      { value: 'monochrome', checked: true },
+    ],
+  };
+
+  assert.equal(rerenderIsochroneFromSnapshot(shell, null), false);
+  assert.equal(shell.boundaryCanvas.style.visibility, '');
+  assert.equal(shell.isochroneLegend.style.visibility, '');
+
+  // Loaded, but nothing routed on it yet: a monochrome basemap, not a colour
+  // one, and drawn without waiting on a triangulation that has no bands to
+  // classify.
+  shell.boundaryCanvas.style.visibility = 'hidden';
+  shell.isochroneLegend.style.visibility = 'hidden';
+  const mapData = {
+    graph: {
+      header: { nNodes: 4, nEdges: 0, gridWidthPx: 100, gridHeightPx: 100, pixelSizeM: 10 },
+      nodeI32: new Int32Array(16),
+      nodeU32: new Uint32Array(16),
+      nodeU16: new Uint16Array(32),
+      edgeU32: new Uint32Array(0),
+      edgeU16: new Uint16Array(0),
+      edgeModeMask: new Uint8Array(0),
+      edgeRoadClassId: new Uint8Array(0),
+    },
+    nodePixels: {
+      nodePixelX: Uint16Array.of(10, 20, 20, 10),
+      nodePixelY: Uint16Array.of(10, 10, 20, 20),
+    },
+    lastRoutingSnapshot: null,
+  };
+  assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), true);
+  assert.equal(shell.boundaryCanvas.style.visibility, 'hidden');
+  assert.equal(drawnScenes.at(-1).ribbons, null, 'nothing reachable, so no zones to draw');
+
+  // A snapshot too short for the new graph - the old region's distances
+  // against the new region's nodes - is no field at all, and is treated as one.
+  mapData.lastRoutingSnapshot = { distSeconds: new Float32Array(2) };
+  assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), true);
+  assert.equal(shell.boundaryCanvas.style.visibility, 'hidden');
+  assert.equal(drawnScenes.at(-1).ribbons, null);
+});
+
+test('an origin that reaches nowhere still draws a monochrome map', () => {
+  // A field with no bands in it is not a failure to draw: the coastline and
+  // the roads are still there, and that is what a reader needs to see. Two
+  // answers to this have already been wrong - clearing the canvas under hidden
+  // chrome, which is a blank window, and putting the chrome back, which
+  // answers a monochrome setting with the colour basemap.
+  const drawnScenes = [];
+  const shell = {
+    isochroneCanvas: {
+      width: 100,
+      height: 100,
+      style: {},
+      __isochroneRenderer: {
+        draw() {},
+        drawMonochromeScene(scene) {
+          drawnScenes.push(scene);
+        },
+        clear() {},
+      },
+    },
+    boundaryCanvas: { style: { visibility: 'hidden' } },
+    isochroneLegend: { style: { visibility: 'hidden' } },
+    mapStyleRadios: [
+      { value: 'colour', checked: false },
+      { value: 'monochrome', checked: true },
+    ],
+  };
+  const mapData = {
+    graph: {
+      header: { nNodes: 4, nEdges: 0, gridWidthPx: 100, gridHeightPx: 100, pixelSizeM: 10 },
+      nodeI32: new Int32Array(16),
+      nodeU32: new Uint32Array(16),
+      nodeU16: new Uint16Array(32),
+      edgeU32: new Uint32Array(0),
+      edgeU16: new Uint16Array(0),
+      edgeModeMask: new Uint8Array(0),
+      edgeRoadClassId: new Uint8Array(0),
+    },
+    nodePixels: {
+      nodePixelX: Uint16Array.of(10, 20, 20, 10),
+      nodePixelY: Uint16Array.of(10, 10, 20, 20),
+    },
+    lastRoutingSnapshot: { distSeconds: new Float32Array(4).fill(Infinity) },
+  };
+
+  assert.equal(rerenderIsochroneFromSnapshot(shell, mapData), true);
+  assert.equal(drawnScenes.length, 1, 'a scene was drawn');
+  assert.equal(drawnScenes[0].ribbons, null, 'and it has no zones to draw');
+  assert.equal(shell.boundaryCanvas.style.visibility, 'hidden', 'the colour basemap stays down');
+  assert.equal(shell.isochroneLegend.style.visibility, 'hidden', 'and so does the colour key');
 });

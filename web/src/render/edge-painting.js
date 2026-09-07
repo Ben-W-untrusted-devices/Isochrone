@@ -13,12 +13,7 @@ import {
   validateNodePixels,
   validateSettledBatch,
 } from '../core/routing-validation.js';
-import {
-  setPixel,
-  setTravelTimePixelMin,
-  validatePixelGrid,
-  validateTravelTimeGrid,
-} from './pixel-grid.js';
+import { setPixel, validatePixelGrid } from './pixel-grid.js';
 
 // Rasterising the travel-time field along graph edges.
 //
@@ -177,49 +172,6 @@ export function paintInterpolatedEdgeToGrid(
   return paintedCount;
 }
 
-export function paintInterpolatedEdgeTravelTimesToGrid(
-  travelTimeGrid,
-  x0,
-  y0,
-  startSeconds,
-  x1,
-  y1,
-  endSeconds,
-  options = {},
-) {
-  validateTravelTimeGrid(travelTimeGrid);
-
-  const stepStride = options.stepStride ?? 1;
-  if (!Number.isInteger(stepStride) || stepStride <= 0) {
-    throw new Error('stepStride must be a positive integer');
-  }
-  const startX = Math.round(x0);
-  const startY = Math.round(y0);
-  const endX = Math.round(x1);
-  const endY = Math.round(y1);
-  const totalSteps = Math.max(Math.abs(endX - startX), Math.abs(endY - startY));
-  let paintedCount = 0;
-  let stepIndex = 0;
-
-  rasterizeLinePixels(x0, y0, x1, y1, (xPx, yPx) => {
-    if (stepIndex % stepStride !== 0 && stepIndex !== totalSteps) {
-      stepIndex += 1;
-      return;
-    }
-    const seconds = interpolateEdgeTravelSeconds(
-      startSeconds,
-      endSeconds,
-      stepIndex,
-      totalSteps,
-    );
-    if (setTravelTimePixelMin(travelTimeGrid, xPx, yPx, seconds)) {
-      paintedCount += 1;
-    }
-    stepIndex += 1;
-  });
-
-  return paintedCount;
-}
 
 export function paintReachableNodesToGrid(pixelGrid, nodePixels, distSeconds, options = {}) {
   validatePixelGrid(pixelGrid);
@@ -248,24 +200,6 @@ export function paintReachableNodesToGrid(pixelGrid, nodePixels, distSeconds, op
   return paintedCount;
 }
 
-export function paintReachableNodesTravelTimesToGrid(travelTimeGrid, nodePixels, distSeconds) {
-  validateTravelTimeGrid(travelTimeGrid);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-
-  let paintedCount = 0;
-  for (let nodeIndex = 0; nodeIndex < nodePixels.nodePixelX.length; nodeIndex += 1) {
-    if (distSeconds[nodeIndex] < Infinity) {
-      const xPx = nodePixels.nodePixelX[nodeIndex];
-      const yPx = nodePixels.nodePixelY[nodeIndex];
-      if (setTravelTimePixelMin(travelTimeGrid, xPx, yPx, distSeconds[nodeIndex])) {
-        paintedCount += 1;
-      }
-    }
-  }
-
-  return paintedCount;
-}
 
 export function forEachEligibleOutgoingEdgeFromSourceNode(
   graph,
@@ -382,38 +316,6 @@ export function paintEligibleOutgoingEdgesFromSourceNode(
   );
 }
 
-export function paintEligibleOutgoingEdgesFromSourceNodeToTravelTimeGrid(
-  travelTimeGrid,
-  graph,
-  nodePixels,
-  distSeconds,
-  sourceNodeIndex,
-  allowedModeMask,
-  edgeSlackSeconds,
-  stepStride,
-  edgeTraversalCostSeconds,
-) {
-  return forEachEligibleOutgoingEdgeFromSourceNode(
-    graph,
-    nodePixels,
-    distSeconds,
-    sourceNodeIndex,
-    allowedModeMask,
-    edgeSlackSeconds,
-    edgeTraversalCostSeconds,
-    (x0, y0, startSeconds, x1, y1, expectedTargetSeconds) =>
-      paintInterpolatedEdgeTravelTimesToGrid(
-        travelTimeGrid,
-        x0,
-        y0,
-        startSeconds,
-        x1,
-        y1,
-        expectedTargetSeconds,
-        { stepStride },
-      ),
-  );
-}
 
 export function paintSettledBatchToGrid(pixelGrid, nodePixels, distSeconds, settledBatch, options = {}) {
   validatePixelGrid(pixelGrid);
@@ -448,33 +350,6 @@ export function paintSettledBatchToGrid(pixelGrid, nodePixels, distSeconds, sett
   return paintedCount;
 }
 
-export function paintSettledBatchTravelTimesToGrid(
-  travelTimeGrid,
-  nodePixels,
-  distSeconds,
-  settledBatch,
-) {
-  validateTravelTimeGrid(travelTimeGrid);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-  validateSettledBatch(settledBatch);
-
-  let paintedCount = 0;
-  for (const nodeIndex of settledBatch) {
-    if (nodeIndex < 0 || nodeIndex >= nodePixels.nodePixelX.length) {
-      continue;
-    }
-    if (!(distSeconds[nodeIndex] < Infinity)) {
-      continue;
-    }
-    const xPx = nodePixels.nodePixelX[nodeIndex];
-    const yPx = nodePixels.nodePixelY[nodeIndex];
-    if (setTravelTimePixelMin(travelTimeGrid, xPx, yPx, distSeconds[nodeIndex])) {
-      paintedCount += 1;
-    }
-  }
-  return paintedCount;
-}
 
 export function paintSettledBatchEdgeInterpolationsToGrid(
   pixelGrid,
@@ -521,42 +396,6 @@ export function paintSettledBatchEdgeInterpolationsToGrid(
   return paintedCount;
 }
 
-export function paintSettledBatchEdgeInterpolationsToTravelTimeGrid(
-  travelTimeGrid,
-  graph,
-  nodePixels,
-  distSeconds,
-  settledBatch,
-  allowedModeMask,
-  options = {},
-) {
-  validateTravelTimeGrid(travelTimeGrid);
-  validateGraphForRouting(graph);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-  validateSettledBatch(settledBatch);
-  const {
-    edgeSlackSeconds,
-    stepStride,
-    edgeTraversalCostSeconds,
-  } = normalizeEdgeInterpolationOptions(graph, allowedModeMask, options);
-
-  let paintedCount = 0;
-  for (const sourceNodeIndex of settledBatch) {
-    paintedCount += paintEligibleOutgoingEdgesFromSourceNodeToTravelTimeGrid(
-      travelTimeGrid,
-      graph,
-      nodePixels,
-      distSeconds,
-      sourceNodeIndex,
-      allowedModeMask,
-      edgeSlackSeconds,
-      stepStride,
-      edgeTraversalCostSeconds,
-    );
-  }
-  return paintedCount;
-}
 
 export function paintAllReachableEdgeInterpolationsToGrid(
   pixelGrid,
@@ -600,40 +439,6 @@ export function paintAllReachableEdgeInterpolationsToGrid(
   return paintedCount;
 }
 
-export function paintAllReachableEdgeInterpolationsToTravelTimeGrid(
-  travelTimeGrid,
-  graph,
-  nodePixels,
-  distSeconds,
-  allowedModeMask,
-  options = {},
-) {
-  validateTravelTimeGrid(travelTimeGrid);
-  validateGraphForRouting(graph);
-  validateNodePixels(nodePixels);
-  validateDistSeconds(distSeconds, nodePixels.nodePixelX.length);
-  const {
-    edgeSlackSeconds,
-    stepStride,
-    edgeTraversalCostSeconds,
-  } = normalizeEdgeInterpolationOptions(graph, allowedModeMask, options);
-
-  let paintedCount = 0;
-  for (let sourceNodeIndex = 0; sourceNodeIndex < graph.header.nNodes; sourceNodeIndex += 1) {
-    paintedCount += paintEligibleOutgoingEdgesFromSourceNodeToTravelTimeGrid(
-      travelTimeGrid,
-      graph,
-      nodePixels,
-      distSeconds,
-      sourceNodeIndex,
-      allowedModeMask,
-      edgeSlackSeconds,
-      stepStride,
-      edgeTraversalCostSeconds,
-    );
-  }
-  return paintedCount;
-}
 
 export function createEdgeVertexBufferBuilder(initialCapacityFloats = 32768) {
   if (!Number.isInteger(initialCapacityFloats) || initialCapacityFloats <= 0) {
@@ -763,6 +568,78 @@ export function collectSettledBatchTravelTimeEdgeVertices(
   return finalizeEdgeVertexBufferBuilder(builder);
 }
 
+const ELIGIBLE_EDGE_LIST_PROPERTY = '__eligibleEdgeLists';
+
+/**
+ * The edges a mode can use at all, listed once per graph.
+ *
+ * Which edges a mode may use, and where each one leads, is a property of the
+ * graph: it does not change when the origin moves. Walking the node table to
+ * rediscover it on every routing run was most of the cost of collecting the
+ * ways - Berlin has 1.43 million edges and did it for each of them - so it is
+ * found once and kept.
+ *
+ * The traversal cost is deliberately not part of this. It changes with the
+ * walking and cycling speeds, and a list that had to be rebuilt when a speed
+ * changed would be the same waste under a different name - worse, an edge left
+ * out of the list while its cost was zero would stay out after the speed that
+ * made it zero had changed.
+ *
+ * Two masks are kept at a time, which covers switching between mode selections
+ * without letting a list per combination accumulate; each is eight bytes per
+ * edge.
+ */
+function getOrBuildEligibleEdgeList(graph, allowedModeMask) {
+  let lists = graph[ELIGIBLE_EDGE_LIST_PROPERTY];
+  if (lists === undefined) {
+    lists = new Map();
+    graph[ELIGIBLE_EDGE_LIST_PROPERTY] = lists;
+  }
+  const cached = lists.get(allowedModeMask);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const nodeCount = graph.header.nNodes;
+  const sources = new Int32Array(graph.header.nEdges);
+  const edgeIndices = new Int32Array(graph.header.nEdges);
+  let count = 0;
+  for (let sourceNodeIndex = 0; sourceNodeIndex < nodeCount; sourceNodeIndex += 1) {
+    const firstEdgeIndex = graph.nodeU32[sourceNodeIndex * 4 + 2];
+    const endEdgeIndex = firstEdgeIndex + graph.nodeU16[sourceNodeIndex * 8 + 6];
+    for (let edgeIndex = firstEdgeIndex; edgeIndex < endEdgeIndex; edgeIndex += 1) {
+      if ((graph.edgeModeMask[edgeIndex] & allowedModeMask) === 0) {
+        continue;
+      }
+      const targetNodeIndex = graph.edgeU32[edgeIndex * 3];
+      if (targetNodeIndex < 0 || targetNodeIndex >= nodeCount) {
+        continue;
+      }
+      sources[count] = sourceNodeIndex;
+      edgeIndices[count] = edgeIndex;
+      count += 1;
+    }
+  }
+
+  const list = {
+    sources: sources.subarray(0, count),
+    edgeIndices: edgeIndices.subarray(0, count),
+    count,
+  };
+  if (lists.size >= 2) {
+    lists.delete(lists.keys().next().value);
+  }
+  lists.set(allowedModeMask, list);
+  return list;
+}
+
+/**
+ * Every reachable edge as a pair of vertices carrying travel times.
+ *
+ * Counted first and filled second, so the buffer is allocated at the size it
+ * ends up rather than grown into or over-allocated at one slot per edge in the
+ * graph. Both passes read the same list in the same order, so they agree.
+ */
 export function collectAllReachableTravelTimeEdgeVertices(
   graph,
   nodePixels,
@@ -780,19 +657,59 @@ export function collectAllReachableTravelTimeEdgeVertices(
     validateStepStride: false,
   });
 
-  const builder = resetEdgeVertexBufferBuilder(options.builder ?? createEdgeVertexBufferBuilder());
-  for (let sourceNodeIndex = 0; sourceNodeIndex < graph.header.nNodes; sourceNodeIndex += 1) {
-    collectEligibleOutgoingTravelTimeEdgeVerticesFromSourceNode(
-      graph,
-      nodePixels,
-      distSeconds,
-      sourceNodeIndex,
-      allowedModeMask,
-      edgeSlackSeconds,
-      builder,
-      edgeTraversalCostSeconds,
-    );
+  const { sources, edgeIndices, count } = getOrBuildEligibleEdgeList(graph, allowedModeMask);
+  const { nodePixelX, nodePixelY } = nodePixels;
+
+  let kept = 0;
+  for (let index = 0; index < count; index += 1) {
+    const startSeconds = distSeconds[sources[index]];
+    if (!Number.isFinite(startSeconds)) {
+      continue;
+    }
+    const edgeIndex = edgeIndices[index];
+    const edgeCostSeconds = edgeTraversalCostSeconds[edgeIndex];
+    if (!(edgeCostSeconds > 0) || !Number.isFinite(edgeCostSeconds)) {
+      continue;
+    }
+    const targetSeconds = distSeconds[graph.edgeU32[edgeIndex * 3]];
+    if (!Number.isFinite(targetSeconds)) {
+      continue;
+    }
+    if (startSeconds + edgeCostSeconds > targetSeconds + edgeSlackSeconds) {
+      continue;
+    }
+    kept += 1;
   }
 
-  return finalizeEdgeVertexBufferBuilder(builder);
+  const vertices = new Float32Array(kept * 6);
+  let written = 0;
+  for (let index = 0; index < count; index += 1) {
+    const sourceNodeIndex = sources[index];
+    const startSeconds = distSeconds[sourceNodeIndex];
+    if (!Number.isFinite(startSeconds)) {
+      continue;
+    }
+    const edgeIndex = edgeIndices[index];
+    const edgeCostSeconds = edgeTraversalCostSeconds[edgeIndex];
+    if (!(edgeCostSeconds > 0) || !Number.isFinite(edgeCostSeconds)) {
+      continue;
+    }
+    const targetNodeIndex = graph.edgeU32[edgeIndex * 3];
+    const targetSeconds = distSeconds[targetNodeIndex];
+    if (!Number.isFinite(targetSeconds)) {
+      continue;
+    }
+    const expectedTargetSeconds = startSeconds + edgeCostSeconds;
+    if (expectedTargetSeconds > targetSeconds + edgeSlackSeconds) {
+      continue;
+    }
+    vertices[written] = nodePixelX[sourceNodeIndex];
+    vertices[written + 1] = nodePixelY[sourceNodeIndex];
+    vertices[written + 2] = startSeconds;
+    vertices[written + 3] = nodePixelX[targetNodeIndex];
+    vertices[written + 4] = nodePixelY[targetNodeIndex];
+    vertices[written + 5] = expectedTargetSeconds;
+    written += 6;
+  }
+  return vertices;
 }

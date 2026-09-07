@@ -18,6 +18,27 @@ import {
 
 const SVG_FONT_STACK = 'Segoe UI, Tahoma, Geneva, Verdana, sans-serif';
 
+/**
+ * The poster frame in monochrome: ink on paper, and the scale bar in the same
+ * black-and-white it uses on the map itself.
+ */
+const MONOCHROME_OVERLAY_COLOURS = {
+  overlayBackground: '#ffffff',
+  overlayBorder: '#000000',
+  overlayText: '#000000',
+  overlayNote: '#000000',
+  scaleLineBackground: '#ffffff',
+  scaleLineAlternate: '#000000',
+  scaleLineBorder: '#000000',
+  boundaryStroke: '#000000',
+  boundaryWaterFill: '#ffffff',
+  forestFill: '#ffffff',
+  inlandWaterFill: '#ffffff',
+  waterwayNavigableStroke: '#000000',
+  waterwayNonNavigableStroke: '#000000',
+  airportFill: '#ffffff',
+};
+
 const DEFAULT_OVERLAY_COLOURS = {
   dark: {
     overlayBackground: 'rgba(4, 12, 18, 0.88)',
@@ -559,15 +580,26 @@ function buildSvgPathCommands(path) {
 
 function buildSvgFilledPolygonMarkup(features, fillColour, groupId) {
   const pathMarkup = [];
+  // One <path> per feature, not per ring. A feature's rings are an outer
+  // boundary and its holes: an OSM coastline is the sea *with the islands
+  // taken out of it*, and Portsea Island is a hole in Portsmouth's. Emitting
+  // each ring as its own filled path throws that relationship away and paints
+  // the island as sea - which is what the on-screen canvas never did, because
+  // it has always put a feature's rings into one path and filled once.
+  //
+  // even-odd rather than nonzero so the hole is subtracted whichever way it
+  // winds. The data does wind holes opposite today, but nothing enforces it,
+  // and a silently flooded island is a poor way to find out it stopped.
   for (const feature of features) {
-    for (const path of feature.paths) {
-      if (path.length < 3) {
-        continue;
-      }
-      pathMarkup.push(
-        `    <path d="${buildSvgPathCommands(path)} Z" fill="${escapeXml(fillColour)}" stroke="none" />`,
-      );
+    const rings = feature.paths.filter((path) => path.length >= 3);
+    if (rings.length === 0) {
+      continue;
     }
+    const commands = rings.map((path) => `${buildSvgPathCommands(path)} Z`).join(' ');
+    pathMarkup.push(
+      `    <path d="${commands}" fill="${escapeXml(fillColour)}"`
+      + ' fill-rule="evenodd" stroke="none" />',
+    );
   }
 
   if (pathMarkup.length === 0) {
@@ -699,7 +731,13 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
   assertPositiveInteger(widthPx, 'widthPx');
   assertPositiveInteger(heightPx, 'heightPx');
 
-  const backgroundColour = options.backgroundColour ?? options.backgroundColor ?? '#ffffff';
+  const monochromeMapMarkup = typeof options.monochromeMapMarkup === 'string'
+    && options.monochromeMapMarkup.length > 0
+    ? options.monochromeMapMarkup
+    : null;
+  const backgroundColour = monochromeMapMarkup
+    ? '#ffffff'
+    : (options.backgroundColour ?? options.backgroundColor ?? '#ffffff');
   assertCssColourString(backgroundColour, 'backgroundColour');
   const edgeVertexData = options.edgeVertexData ?? new Float32Array(0);
   assertEdgeVertexData(edgeVertexData);
@@ -709,10 +747,16 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
   }
 
   const theme = normalizeIsochroneTheme(options.theme, ISOCHRONE_THEME_DARK);
-  const overlayColours = resolveSvgOverlayColours(null, {
-    overlayColours: options.overlayColours,
-    theme,
-  });
+  // A monochrome sheet is black on white throughout. The frame's colours come
+  // from the interface theme, so a dark-themed browser printed its title,
+  // scale bar and credits in pale blue on white paper - legible on screen,
+  // barely there on paper, and not monochrome by any reading.
+  const overlayColours = monochromeMapMarkup
+    ? MONOCHROME_OVERLAY_COLOURS
+    : resolveSvgOverlayColours(null, {
+      overlayColours: options.overlayColours,
+      theme,
+    });
   const title = typeof options.title === 'string' ? options.title : 'Isochrone export';
   const subtitle = typeof options.subtitle === 'string' ? options.subtitle : '';
   const scaleBarLabel =
@@ -843,18 +887,25 @@ export function buildRenderedIsochroneSvgDocument(options = {}) {
     // The map keeps its own pixel coordinate system; the poster frame is built
     // around it by translation, so projected geometry never has to be rescaled.
     `  <g id="isochrone-map" clip-path="url(#isochrone-map-clip)" transform="translate(${formatSvgNumber(layout.mapX)}, ${formatSvgNumber(layout.mapY)})">`,
-    forestMarkup,
-    airportMarkup,
-    inlandWaterMarkup,
-    seaMarkup,
-    waterwayMarkup,
-    boundaryMarkup,
-    '  <g id="isochrone-edges">',
-    edgeLines,
-    '  </g>',
+    // Monochrome draws its own basemap, bands and key - it is a different map,
+    // not this one recoloured - so it replaces every layer here rather than
+    // being laid over them. Nested as an <svg> so its own coordinate system
+    // survives the poster's translation untouched.
+    monochromeMapMarkup ?? [
+      forestMarkup,
+      airportMarkup,
+      inlandWaterMarkup,
+      seaMarkup,
+      waterwayMarkup,
+      boundaryMarkup,
+      '  <g id="isochrone-edges">',
+      edgeLines,
+      '  </g>',
+    ].filter((line) => line.length > 0).join('\n'),
     '  </g>',
     titleOverlayMarkup,
-    legendOverlayMarkup,
+    // The colour key would be describing bands that are not on the sheet.
+    monochromeMapMarkup ? '' : legendOverlayMarkup,
     scaleOverlayMarkup,
     copyrightOverlayMarkup,
     '</svg>',
@@ -990,6 +1041,7 @@ export function exportCurrentRenderedIsochroneSvg(shell, options = {}) {
     backgroundColour,
     graphHeader: options.graphHeader ?? null,
     boundaryPayload: options.boundaryPayload ?? null,
+    monochromeMapMarkup: options.monochromeMapMarkup ?? null,
     edgeVertexData: options.edgeVertexData ?? new Float32Array(0),
     cycleMinutes: options.cycleMinutes ?? DEFAULT_COLOUR_CYCLE_MINUTES,
     theme,
