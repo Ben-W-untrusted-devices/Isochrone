@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   collectBandBoundaryCrossings,
   OUTPUT_PIXELS_PER_MM,
+  labelBoxSitsOnLine,
   planRibbonContourLabels,
   ribbonWidthPx,
   buildBandOrderedSegments,
@@ -72,43 +73,6 @@ test('the zone width is a length on the sheet, not a count of pixels', () => {
   assert.ok(Math.abs(ribbonWidthPx(15, 300 / 25.4) - 177.16) < 0.01);
 });
 
-test('crowded labels are thinned, distant ones are kept', () => {
-  const identity = (x, y) => [x, y];
-  const crossings = [
-    { x: 100, y: 100, seconds: 900, wayX: 1, wayY: 0 },
-    { x: 110, y: 100, seconds: 900, wayX: 1, wayY: 0 },
-    { x: 400, y: 100, seconds: 900, wayX: 1, wayY: 0 },
-  ];
-  const labels = planRibbonContourLabels(crossings, {
-    transform: identity,
-    widthPx: 600,
-    heightPx: 400,
-    spacingPx: 100,
-    formatLabel: () => '15 min',
-  });
-
-  assert.equal(labels.length, 2, 'the two ten pixels apart became one');
-  assert.deepEqual(labels.map((label) => label.x), [100, 400]);
-});
-
-test('a label sits across the way, because that is how the contour runs', () => {
-  const labels = planRibbonContourLabels(
-    [{ x: 10, y: 10, seconds: 900, wayX: 0, wayY: 5 }],
-    {
-      transform: (x, y) => [x, y],
-      widthPx: 100,
-      heightPx: 100,
-      spacingPx: 50,
-      formatLabel: () => '15 min',
-    },
-  );
-
-  // The way runs due south, so the contour runs east-west and the label is
-  // level with it.
-  assert.equal(labels.length, 1);
-  assert.ok(Math.abs(labels[0].angleDegrees) < 1e-9, `angle was ${labels[0].angleDegrees}`);
-});
-
 test('labels outside the frame are dropped', () => {
   const labels = planRibbonContourLabels(
     [{ x: -50, y: 10, seconds: 900, wayX: 1, wayY: 0 }],
@@ -149,19 +113,70 @@ test('a label follows its contour, not the way that happens to cross it', () => 
   }
 });
 
-test('where a contour has no direction to read, the way is the fallback', () => {
-  // One crossing on its own: nothing to fit a line to, so it falls back to
-  // square across the way, which is right where a way crosses squarely.
-  const labels = planRibbonContourLabels(
-    [{ x: 50, y: 50, seconds: 900, wayX: 0, wayY: 5 }],
-    {
-      transform: (x, y) => [x, y],
-      widthPx: 200,
-      heightPx: 200,
-      spacingPx: 60,
-      formatLabel: () => '15 min',
-    },
-  );
-  assert.equal(labels.length, 1);
-  assert.ok(Math.abs(labels[0].angleDegrees) < 1e-9);
+/** A run of crossings along one boundary, close enough to read as one line. */
+function crossingsAlong(from, to, step, seconds = 900) {
+  const points = [];
+  const span = Math.hypot(to[0] - from[0], to[1] - from[1]);
+  for (let travelled = 0; travelled <= span; travelled += step) {
+    const fraction = span === 0 ? 0 : travelled / span;
+    points.push({
+      x: from[0] + (to[0] - from[0]) * fraction,
+      y: from[1] + (to[1] - from[1]) * fraction,
+      seconds,
+      wayX: 1,
+      wayY: 0,
+    });
+  }
+  return points;
+}
+
+test('a value repeats along a contour long enough to carry it twice', () => {
+  // An isobar or an altitude line carries its value more than once, so a
+  // reader never has far to follow it.
+  const labels = planRibbonContourLabels(crossingsAlong([20, 300], [980, 300], 10), {
+    transform: (x, y) => [x, y],
+    widthPx: 1000,
+    heightPx: 600,
+    spacingPx: 200,
+    fontSize: 12,
+    formatLabel: () => '15 min',
+  });
+
+  assert.ok(labels.length >= 3, `only ${labels.length} labels on a 960 pixel line`);
+  const xs = labels.map((label) => label.x).sort((a, b) => a - b);
+  for (let index = 1; index < xs.length; index += 1) {
+    assert.ok(xs[index] - xs[index - 1] >= 200, `labels ${xs[index - 1]} and ${xs[index]} crowd`);
+  }
+});
+
+test('a line too short to sit a value on is left unlabelled', () => {
+  // Dropped rather than placed badly: the reader can follow the line to the
+  // next value, and a value in the wrong place is worse than an absent one.
+  const labels = planRibbonContourLabels(crossingsAlong([100, 100], [110, 100], 5), {
+    transform: (x, y) => [x, y],
+    widthPx: 400,
+    heightPx: 400,
+    spacingPx: 100,
+    fontSize: 12,
+    formatLabel: () => '15 min',
+  });
+  assert.deepEqual(labels, []);
+});
+
+test('a box sits on its line only when the line runs in one end and out the other', () => {
+  const straight = [[0, 0], [50, 0], [100, 0], [150, 0], [200, 0]];
+  // Centred on the line and level with it: in at the front, out at the back.
+  assert.equal(labelBoxSitsOnLine(straight, 100, 0, 0, 30, 8), true);
+
+  // The same box turned across the line: the line now enters and leaves
+  // through the long sides, which is a value written across its own contour.
+  assert.equal(labelBoxSitsOnLine(straight, 100, 0, 90, 30, 8), false);
+
+  // Set beside the line rather than on it: the line misses the box entirely.
+  assert.equal(labelBoxSitsOnLine(straight, 100, 40, 0, 30, 8), false);
+
+  // A line that turns back on itself inside the box enters and leaves through
+  // the same end, which reads as a value floating in a bend.
+  const hairpin = [[0, 0], [100, 0], [100, 4], [0, 4]];
+  assert.equal(labelBoxSitsOnLine(hairpin, 60, 2, 0, 30, 8), false);
 });

@@ -361,6 +361,7 @@ export function buildMonochromeScene(mapData, snapshot, options = {}) {
       widthPx,
       heightPx,
       spacingPx: options.labelSpacingPx ?? Math.max(ribbonPx * 3, 160),
+      fontSize: labelFontSize,
       formatLabel: (seconds) => formatBandLabel(seconds / 60, options.formatMinutes),
     })
     : [];

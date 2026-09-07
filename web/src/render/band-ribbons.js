@@ -87,18 +87,163 @@ export function collectBandBoundaryCrossings(segments, bandSeconds) {
 }
 
 /**
- * Contour labels, thinned so they do not sit on top of one another.
+ * How wide a character is, as a fraction of the font size.
  *
- * Acceptance is a distance test against what has already been placed rather
- * than a bucket per cell, so which label survives does not depend on where a
- * grid happens to fall - the cells here only narrow the search.
+ * A rough average for the digits and short words a value is made of, which is
+ * all this needs: it sizes the box a label is tested in, and being a little
+ * generous there only makes the test stricter.
+ */
+const LABEL_WIDTH_PER_CHARACTER = 0.55;
+
+/** How far apart two crossings of one boundary can be and still be one line. */
+const DEFAULT_CHAIN_JOIN_PX = 24;
+
+/**
+ * The crossings of one boundary, joined into the lines they lie on.
  *
- * A label is set along its own contour, and the contour's direction is taken
- * from the other crossings of the same boundary nearby, not from the way that
- * happens to cross it. The way is only the normal of the contour where it runs
- * straight out from the origin; a ring road meets the same boundary running
- * along it, and reading the angle off that road stood the label at right
- * angles to the line it belongs to.
+ * Each crossing is a point where a way passes through a band boundary, so the
+ * crossings of one boundary are samples of one contour - possibly several,
+ * where the contour has separate branches. Joining each to its nearest unused
+ * neighbour within a radius recovers those branches, and gives a line with a
+ * direction, which is what a label needs to sit along.
+ */
+export function buildContourChains(points, joinRadiusPx = DEFAULT_CHAIN_JOIN_PX) {
+  const cells = new Map();
+  const cellOf = (x, y) => Math.floor(y / joinRadiusPx) * 73856093 + Math.floor(x / joinRadiusPx);
+  points.forEach((point, index) => {
+    const key = cellOf(point[0], point[1]);
+    const bucket = cells.get(key);
+    if (bucket === undefined) {
+      cells.set(key, [index]);
+    } else {
+      bucket.push(index);
+    }
+  });
+
+  const used = new Uint8Array(points.length);
+  const nearestUnused = (fromIndex) => {
+    const [x, y] = points[fromIndex];
+    let best = -1;
+    let bestDistance = joinRadiusPx;
+    const column = Math.floor(x / joinRadiusPx);
+    const row = Math.floor(y / joinRadiusPx);
+    for (let dy = -1; dy <= 1; dy += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        const bucket = cells.get((row + dy) * 73856093 + (column + dx));
+        if (bucket === undefined) {
+          continue;
+        }
+        for (const candidate of bucket) {
+          if (used[candidate] || candidate === fromIndex) {
+            continue;
+          }
+          const distance = Math.hypot(points[candidate][0] - x, points[candidate][1] - y);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            best = candidate;
+          }
+        }
+      }
+    }
+    return best;
+  };
+
+  const chains = [];
+  for (let seed = 0; seed < points.length; seed += 1) {
+    if (used[seed]) {
+      continue;
+    }
+    used[seed] = 1;
+    const chain = [points[seed]];
+    // Outwards from the seed in one direction, then the other, so a seed that
+    // lands in the middle of a line still recovers the whole of it.
+    for (const append of [true, false]) {
+      let from = seed;
+      for (;;) {
+        const next = nearestUnused(from);
+        if (next < 0) {
+          break;
+        }
+        used[next] = 1;
+        if (append) {
+          chain.push(points[next]);
+        } else {
+          chain.unshift(points[next]);
+        }
+        from = next;
+      }
+    }
+    chains.push(chain);
+  }
+  return chains;
+}
+
+/**
+ * Whether a box set on a line crosses it once at the front and once at the
+ * back, and nowhere else.
+ *
+ * That is what it means for a value to sit *on* its contour: the line runs in
+ * one end of the text and out of the other. A box the line enters and leaves
+ * through the same side is lying alongside a line it does not belong to, and
+ * one the line crosses through the top or bottom has the text across its own
+ * contour rather than along it. Both read as a value floating free of any line.
+ */
+export function labelBoxSitsOnLine(chain, centreX, centreY, angleDegrees, halfWidth, halfHeight) {
+  const angle = (angleDegrees * Math.PI) / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  // Into the box's own frame, where it is an upright rectangle.
+  const toLocal = (point) => {
+    const dx = point[0] - centreX;
+    const dy = point[1] - centreY;
+    return [dx * cos + dy * sin, -dx * sin + dy * cos];
+  };
+
+  let leading = 0;
+  let trailing = 0;
+  let sides = 0;
+  let previous = toLocal(chain[0]);
+  for (let index = 1; index < chain.length; index += 1) {
+    const current = toLocal(chain[index]);
+    // Where this piece of line crosses each of the four edges.
+    if ((previous[0] < -halfWidth) !== (current[0] < -halfWidth)) {
+      const t = (-halfWidth - previous[0]) / (current[0] - previous[0]);
+      if (Math.abs(previous[1] + (current[1] - previous[1]) * t) <= halfHeight) {
+        leading += 1;
+      }
+    }
+    if ((previous[0] > halfWidth) !== (current[0] > halfWidth)) {
+      const t = (halfWidth - previous[0]) / (current[0] - previous[0]);
+      if (Math.abs(previous[1] + (current[1] - previous[1]) * t) <= halfHeight) {
+        trailing += 1;
+      }
+    }
+    for (const edge of [-halfHeight, halfHeight]) {
+      if ((previous[1] < edge) !== (current[1] < edge)) {
+        const t = (edge - previous[1]) / (current[1] - previous[1]);
+        if (Math.abs(previous[0] + (current[0] - previous[0]) * t) <= halfWidth) {
+          sides += 1;
+        }
+      }
+    }
+    previous = current;
+  }
+  return leading === 1 && trailing === 1 && sides === 0;
+}
+
+/**
+ * Contour labels, set along their own line and nowhere else.
+ *
+ * Every crossing of a boundary is a candidate; the ones that survive are those
+ * whose text box the contour enters at one end and leaves at the other. Where
+ * no position on a line satisfies that, the line goes unlabelled rather than
+ * taking the least bad place - a value in the wrong position is worse than an
+ * absent one, because the reader can follow the line to the next one, and this
+ * is what a contour sheet does.
+ *
+ * Labels are also kept apart from one another: the crowding test is a distance
+ * against what has already been placed rather than a bucket per cell, so which
+ * label survives does not depend on where a grid happens to fall.
  */
 export function planRibbonContourLabels(crossings, options) {
   const {
@@ -107,140 +252,65 @@ export function planRibbonContourLabels(crossings, options) {
     heightPx,
     spacingPx = 220,
     formatLabel,
+    fontSize = 12,
     marginPx = 0,
+    chainJoinPx = DEFAULT_CHAIN_JOIN_PX,
   } = options;
-  const kept = [];
-  const buckets = new Map();
-  const columns = Math.ceil(widthPx / spacingPx) + 3;
 
-  // Crossings of one boundary, indexed by where they are, so the direction of
-  // a contour can be read off its own neighbours.
-  const neighbourhood = buildCrossingIndex(crossings, transform, spacingPx);
-
+  // One line per boundary, in output space, built from that boundary's own
+  // crossings.
+  const pointsByBoundary = new Map();
   for (const crossing of crossings) {
     const [x, y] = transform(crossing.x, crossing.y);
-    if (x < -marginPx || y < -marginPx || x > widthPx + marginPx || y > heightPx + marginPx) {
-      continue;
+    const points = pointsByBoundary.get(crossing.seconds);
+    if (points === undefined) {
+      pointsByBoundary.set(crossing.seconds, [[x, y]]);
+    } else {
+      points.push([x, y]);
     }
-    const column = Math.floor(x / spacingPx) + 1;
-    const row = Math.floor(y / spacingPx) + 1;
-    let crowded = false;
-    for (let dy = -1; dy <= 1 && !crowded; dy += 1) {
-      for (let dx = -1; dx <= 1 && !crowded; dx += 1) {
-        const neighbours = buckets.get((row + dy) * columns + (column + dx));
-        if (neighbours === undefined) {
+  }
+
+  const kept = [];
+  const placed = [];
+  const isCrowded = (x, y) => placed.some(
+    (other) => Math.hypot(other[0] - x, other[1] - y) < spacingPx,
+  );
+
+  for (const [seconds, points] of pointsByBoundary) {
+    const text = formatLabel(seconds);
+    const halfWidth = (text.length * fontSize * LABEL_WIDTH_PER_CHARACTER) / 2 + fontSize * 0.3;
+    const halfHeight = fontSize * 0.7;
+
+    for (const chain of buildContourChains(points, chainJoinPx)) {
+      if (chain.length < 3) {
+        continue;
+      }
+      // Along the line, taking every position the box sits properly on that is
+      // far enough from the last one taken. A contour longer than the gap
+      // carries its value more than once, the way an isobar or an altitude
+      // line does, so a reader never has far to follow it.
+      for (let index = 1; index + 1 < chain.length; index += 1) {
+        const [x, y] = chain[index];
+        if (x < -marginPx || y < -marginPx || x > widthPx + marginPx || y > heightPx + marginPx) {
           continue;
         }
-        for (const other of neighbours) {
-          if (Math.hypot(other.x - x, other.y - y) < spacingPx) {
-            crowded = true;
-            break;
-          }
+        if (isCrowded(x, y)) {
+          continue;
         }
+        const before = chain[index - 1];
+        const after = chain[index + 1];
+        const angleDegrees = uprightDegrees(
+          (Math.atan2(after[1] - before[1], after[0] - before[0]) * 180) / Math.PI,
+        );
+        if (!labelBoxSitsOnLine(chain, x, y, angleDegrees, halfWidth, halfHeight)) {
+          continue;
+        }
+        kept.push({ x, y, angleDegrees, seconds, text });
+        placed.push([x, y]);
       }
-    }
-    if (crowded) {
-      continue;
-    }
-
-    const angleDegrees = contourAngleDegrees(neighbourhood, crossing.seconds, x, y, spacingPx)
-      ?? acrossTheWayDegrees(crossing);
-    const label = {
-      x,
-      y,
-      angleDegrees,
-      seconds: crossing.seconds,
-      text: formatLabel(crossing.seconds),
-    };
-    kept.push(label);
-    const key = row * columns + column;
-    const bucket = buckets.get(key);
-    if (bucket === undefined) {
-      buckets.set(key, [label]);
-    } else {
-      bucket.push(label);
     }
   }
   return kept;
-}
-
-/** Output-space positions of every crossing, bucketed by boundary and cell. */
-function buildCrossingIndex(crossings, transform, cellPx) {
-  const byBoundary = new Map();
-  for (const crossing of crossings) {
-    const [x, y] = transform(crossing.x, crossing.y);
-    let cells = byBoundary.get(crossing.seconds);
-    if (cells === undefined) {
-      cells = new Map();
-      byBoundary.set(crossing.seconds, cells);
-    }
-    const key = `${Math.floor(y / cellPx)}|${Math.floor(x / cellPx)}`;
-    const cell = cells.get(key);
-    if (cell === undefined) {
-      cells.set(key, [x, y]);
-    } else {
-      cell.push(x, y);
-    }
-  }
-  return { byBoundary, cellPx };
-}
-
-/**
- * The direction of a contour at a point, from the spread of the boundary's own
- * crossings around it.
- *
- * The principal axis of those points is the line they lie along, which is the
- * contour. Returns null where there are too few of them to say, or where they
- * are scattered rather than strung out - a junction of several contours, where
- * any angle would be a guess.
- */
-function contourAngleDegrees(index, seconds, x, y, radiusPx) {
-  const cells = index.byBoundary.get(seconds);
-  if (cells === undefined) {
-    return null;
-  }
-  const column = Math.floor(x / index.cellPx);
-  const row = Math.floor(y / index.cellPx);
-  let count = 0;
-  let sumXX = 0;
-  let sumXY = 0;
-  let sumYY = 0;
-  for (let dy = -1; dy <= 1; dy += 1) {
-    for (let dx = -1; dx <= 1; dx += 1) {
-      const cell = cells.get(`${row + dy}|${column + dx}`);
-      if (cell === undefined) {
-        continue;
-      }
-      for (let index2 = 0; index2 + 1 < cell.length; index2 += 2) {
-        const offsetX = cell[index2] - x;
-        const offsetY = cell[index2 + 1] - y;
-        if (Math.hypot(offsetX, offsetY) > radiusPx) {
-          continue;
-        }
-        count += 1;
-        sumXX += offsetX * offsetX;
-        sumXY += offsetX * offsetY;
-        sumYY += offsetY * offsetY;
-      }
-    }
-  }
-  if (count < 4) {
-    return null;
-  }
-
-  // Principal axis of the covariance, and how strongly the points prefer it.
-  const trace = sumXX + sumYY;
-  const difference = Math.hypot(sumXX - sumYY, 2 * sumXY);
-  if (trace <= 0 || difference / trace < 0.25) {
-    return null;
-  }
-  const angle = 0.5 * Math.atan2(2 * sumXY, sumXX - sumYY);
-  return uprightDegrees((angle * 180) / Math.PI);
-}
-
-/** The fallback: square to the way, which is right where it crosses squarely. */
-function acrossTheWayDegrees(crossing) {
-  return uprightDegrees((Math.atan2(crossing.wayY, crossing.wayX) * 180) / Math.PI + 90);
 }
 
 /** Turned to within a quarter turn of level, so a value is never upside down. */
