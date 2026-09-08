@@ -799,8 +799,9 @@ export async function runWalkingIsochroneFromSourceNode(
   // between stops when changing, and away from the last one. That walking is
   // ordinary pedestrian movement and must follow the walk graph, so it
   // respects rivers, railways, private land and everything else the graph
-  // already encodes; what keeps "transit only" honest is that each walking
-  // leg is capped by the user's budget rather than being unlimited.
+  // already encodes. The budget bounds the legs walked once the journey is
+  // under way; the walk to the first stop is bounded by the time limit alone,
+  // because shortening it can only ever discard a route that was valid.
   const isTransitOnlyRouting = allowedModeMask === TRANSIT_ONLY_ALLOWED_MODE_MASK;
   const transitWalkBudgetSeconds =
     Number.isFinite(options.transitWalkBudgetSeconds) && options.transitWalkBudgetSeconds >= 0
@@ -937,9 +938,8 @@ export async function runWalkingIsochroneFromSourceNode(
         // Seeded from the stops alone, with the origin folded back in by the
         // elementwise minimum below rather than as a seed here. Keeping the
         // two fields separate is what lets the walk budget bound the walk
-        // *away from a stop* without also bounding the walk away from the
-        // origin, which is a plain walking journey and no business of the
-        // transit budget's.
+        // *away from a stop* without also bounding the walk to the first one,
+        // which is a plain walking journey and no business of the budget's.
         const seedNodeIndices = Uint32Array.from(csaResult.seedNodeIndices);
         const seedStartDistSeconds = Float32Array.from(csaResult.seedStartDistSeconds);
 

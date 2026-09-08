@@ -2398,7 +2398,11 @@ test('runConnectionScanFromWalkingReachableStops prefers the feed\'s own minimum
   assert.equal(declared.stopElapsedSeconds[2], 320);
 });
 
-test('runConnectionScanFromWalkingReachableStops will not walk past the budget to reach a first stop', () => {
+test('a rider walks as far as it takes to reach the first stop', () => {
+  // Walking most of the way and riding the last stretch is the right route
+  // whenever it beats walking all of it. A cap on the walk to the first stop
+  // can only ever discard such a route, never find a better one - so there is
+  // no cap, and the time limit is what bounds the journey.
   const graph = parseGraphBinary(createTransitGraphBuffer({
     nodeCount: 3,
     stops: [
@@ -2417,20 +2421,24 @@ test('runConnectionScanFromWalkingReachableStops will not walk past the budget t
     walkingSpeedMps: 1,
   };
 
-  const withinBudget = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
-    ...scanOptions,
-    walkBudgetSeconds: 300,
-  });
-  assert.equal(withinBudget.seedNodeIndices.length, 1);
-  assert.equal(withinBudget.seedNodeIndices[0], 2);
+  // A budget shorter than the walk is no longer a reason to stay at home: it
+  // describes changing vehicles, not setting off.
+  for (const walkBudgetSeconds of [300, 120]) {
+    const result = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
+      ...scanOptions,
+      walkBudgetSeconds,
+    });
+    assert.equal(result.seedNodeIndices.length, 1, `budget ${walkBudgetSeconds}`);
+    assert.equal(result.seedNodeIndices[0], 2);
+  }
 
-  // The same walk, now longer than the rider is willing to do in one leg: the
-  // service exists and departs in time, and they never reach it.
-  const beyondBudget = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
+  // What does still stop them is the clock: the same walk under a limit that
+  // expires before the service departs reaches no stop at all.
+  const outOfTime = runConnectionScanFromWalkingReachableStops(graph, walkDistSeconds, {
     ...scanOptions,
-    walkBudgetSeconds: 120,
+    timeLimitSeconds: 100,
   });
-  assert.equal(beyondBudget.seedNodeIndices.length, 0);
+  assert.equal(outOfTime.seedNodeIndices.length, 0);
 });
 
 test('the view is carried in the address bar, and cleared when the region changes', () => {
