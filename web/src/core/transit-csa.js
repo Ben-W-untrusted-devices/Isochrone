@@ -44,12 +44,13 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
       ? options.minTransferSeconds
       : TRANSIT_MIN_TRANSFER_SECONDS;
 
-  // How far the rider will walk on any one leg - to the first stop, between
-  // stops when changing, and away from the last one. Passed explicitly rather
-  // than inferred from walkDistSeconds's own limit, because when Walk is a
-  // selected mode that field is deliberately unbounded: the walking isochrone
-  // is a legitimate result in its own right, but it must not let someone walk
-  // an hour to a station and call it a transit journey.
+  // How far the rider will walk mid-journey, changing from one vehicle to the
+  // next. It does not bound the walk to the first stop: that leg is only ever
+  // added to a journey, so capping it can remove a correct answer and can
+  // never add one. Walking most of the way across the map and riding the last
+  // stretch is the right route whenever it beats walking all of it, and the
+  // elementwise minimum against the walk-only field already prefers walking
+  // whenever it does not.
   const walkBudgetSeconds =
     Number.isFinite(options.walkBudgetSeconds) && options.walkBudgetSeconds >= 0
       ? options.walkBudgetSeconds
@@ -68,14 +69,13 @@ export function runConnectionScanFromWalkingReachableStops(graph, walkDistSecond
 
     // Reaching a stop means walking to it on the walk graph and then covering
     // the short fixed offset between the graph node the stop is pinned to and
-    // the platform itself. The whole of that is the access leg, so the whole
-    // of it is what the budget applies to.
+    // the platform itself. Bounded by the time limit below and by nothing
+    // else: a rider who has to walk an hour to the only station within reach
+    // does walk it, if the ride that follows still lands them somewhere they
+    // could not have walked to in the time.
     let bestArrivalSeconds = Number.POSITIVE_INFINITY;
     const walkElapsedSeconds = walkDistSeconds[nodeIndex];
-    if (
-      Number.isFinite(walkElapsedSeconds)
-      && walkElapsedSeconds + attachCostSeconds <= walkBudgetSeconds
-    ) {
+    if (Number.isFinite(walkElapsedSeconds)) {
       bestArrivalSeconds = departureSecondsOfDay + walkElapsedSeconds + attachCostSeconds;
     }
     if (bestArrivalSeconds <= budgetEndSeconds) {
